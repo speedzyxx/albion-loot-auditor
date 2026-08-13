@@ -246,6 +246,11 @@ fn capture_loop(
 
     let mut parser = PhotonParser::new();
     let mut world = SessionWorld::default();
+    world.item_names = crate::items::load_catalog();
+    let _ = app.emit(
+        "capture-log",
+        format!("Catálogo de ítems: {} entradas", world.item_names.len()),
+    );
     let mut last_packet = std::time::Instant::now();
 
     while running.load(Ordering::Relaxed) {

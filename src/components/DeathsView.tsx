@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import { useAppStore } from "../store";
 import { formatTime } from "../lib/format";
+import { ItemIcon } from "./ItemIcon";
 
 export function DeathsView() {
   const deathsAll = useAppStore((s) => s.deaths);
@@ -39,11 +40,14 @@ export function DeathsView() {
               {d.guild ?? "—"} · {d.map ?? "sin mapa"}
             </div>
             {d.lostItems.length > 0 && (
-              <ul className="mt-2 text-sm text-slate-300">
+              <ul className="mt-2 space-y-1 text-sm text-slate-300">
                 {d.lostItems.map((i, idx) => (
-                  <li key={idx}>
-                    {i.quantity}× {i.itemName}
-                    {i.enchantment ? `.${i.enchantment}` : ""}
+                  <li key={idx} className="flex items-center gap-2">
+                    <ItemIcon uniqueName={i.itemUniqueName} enchantment={i.enchantment} size={32} />
+                    <span>
+                      {i.quantity}× {i.itemName}
+                      {i.enchantment ? `.${i.enchantment}` : ""}
+                    </span>
                   </li>
                 ))}
               </ul>

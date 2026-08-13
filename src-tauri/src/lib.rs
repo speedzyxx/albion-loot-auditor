@@ -1,5 +1,6 @@
 mod albion;
 mod capture;
+mod items;
 mod models;
 mod npcap;
 mod photon;

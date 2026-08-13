@@ -4,9 +4,11 @@ import { useMemo } from "react";
 import { useAppStore } from "../store";
 import { displayItem, formatSilver, formatTime } from "../lib/format";
 import type { CaptureStatus } from "../types";
+import { ItemIcon } from "./ItemIcon";
 
 export function LiveView() {
   const lootAll = useAppStore((s) => s.loot);
+  const map = useAppStore((s) => s.map);
   const query = useAppStore((s) => s.query);
   const loot = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -39,7 +41,9 @@ export function LiveView() {
         <div>
           <h1 className="font-display text-3xl font-bold">Combat loot</h1>
           <p className="text-sm text-slate-500">
-            Quién loteó, de qué cadáver, cantidad, encantamiento y valor estimado.
+            Mapa: <span className="text-cyan-300">{map ?? "esperando cambio de cluster"}</span>
+            {" · "}
+            Solo cuenta loot de cadáveres en el mundo, no el banco de ciudad.
           </p>
         </div>
         <div className="flex gap-2">
@@ -81,8 +85,15 @@ export function LiveView() {
           <tbody>
             {loot.length === 0 && (
               <tr>
-                <td colSpan={7} className="px-4 py-16 text-center text-slate-500">
-                  Esperando paquetes Photon. Entra a un ZvZ o carga la sesión demo.
+                <td colSpan={7} className="px-4 py-12 text-center text-slate-500">
+                  <div className="mx-auto max-w-lg space-y-2 text-sm">
+                    <p>Photon está vivo, pero aún no hay loot de combate.</p>
+                    <p>
+                      Sal de la ciudad, mata / entra a un ZvZ y <strong className="text-slate-300">recoge ítems de un cadáver</strong>{" "}
+                      (incluido trash). Mover cosas en el banco no genera eventos de loot.
+                    </p>
+                    <p className="text-xs">O pulsa Demo ZvZ para ver iconos y filas de ejemplo.</p>
+                  </div>
                 </td>
               </tr>
             )}
@@ -92,7 +103,19 @@ export function LiveView() {
                 <td className="px-4 py-2 font-semibold text-gold-400">{e.lootedBy}</td>
                 <td className="px-4 py-2 text-slate-300">{e.lootedFrom || "—"}</td>
                 <td className="px-4 py-2">
-                  {e.isSilver ? `${formatSilver(e.quantity)} silver` : displayItem(e.itemName, e.enchantment, e.quantity)}
+                  <div className="flex items-center gap-3">
+                    <ItemIcon uniqueName={e.itemUniqueName} enchantment={e.enchantment} />
+                    <div>
+                      <div>
+                        {e.isSilver
+                          ? `${formatSilver(e.quantity)} silver`
+                          : displayItem(e.itemName, e.enchantment, e.quantity)}
+                      </div>
+                      {e.itemUniqueName.includes("TRASH") && (
+                        <div className="text-[11px] uppercase tracking-wide text-amber-400">Trash</div>
+                      )}
+                    </div>
+                  </div>
                 </td>
                 <td className="px-4 py-2 text-cyan-300/80">{e.guild ?? "—"}</td>
                 <td className="px-4 py-2 text-xs text-slate-500">{e.map ?? "—"}</td>

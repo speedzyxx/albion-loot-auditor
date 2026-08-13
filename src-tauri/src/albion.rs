@@ -106,51 +106,86 @@ impl SessionWorld {
 
     fn handle_operation(
         &mut self,
-        op: u8,
+        _op: u8,
         p: &BTreeMap<u8, PhotonValue>,
     ) -> Option<SessionEvent> {
-        // Join / ChangeCluster style operations often carry a map name.
-        if op == 35 || op == 2 || op == 67 {
-            if let Some(ev) = self.try_cluster(p) {
-                return Some(ev);
-            }
+        if let Some(ev) = self.try_cluster(p) {
+            return Some(ev);
         }
         self.try_trade(p)
     }
 
     fn try_loot(&self, p: &BTreeMap<u8, PhotonValue>) -> Option<SessionEvent> {
-        let is_silver = p.get(&3).and_then(PhotonValue::as_bool).unwrap_or(false);
-        let looted_by = p.get(&2).and_then(PhotonValue::as_str)?.to_string();
+        let layouts: [(u8, u8, u8, u8, u8); 3] = [
+            (1, 2, 3, 4, 5),
+            (0, 1, 2, 3, 4),
+            (2, 3, 4, 5, 6),
+        ];
+        for (from_k, by_k, silver_k, id_k, qty_k) in layouts {
+            if let Some(ev) = self.parse_loot_layout(p, from_k, by_k, silver_k, id_k, qty_k) {
+                return Some(ev);
+            }
+        }
+        None
+    }
+
+    fn parse_loot_layout(
+        &self,
+        p: &BTreeMap<u8, PhotonValue>,
+        from_k: u8,
+        by_k: u8,
+        silver_k: u8,
+        id_k: u8,
+        qty_k: u8,
+    ) -> Option<SessionEvent> {
+        let is_silver = p.get(&silver_k).and_then(PhotonValue::as_bool).unwrap_or(false);
+        let looted_by = p.get(&by_k).and_then(PhotonValue::as_str)?.to_string();
         if looted_by.is_empty() || !looks_like_player_name(&looted_by) {
             return None;
         }
-        let looted_from = p
-            .get(&1)
+        let mut looted_from = p
+            .get(&from_k)
             .and_then(PhotonValue::as_str)
             .unwrap_or("")
             .to_string();
-        if !is_silver && looted_from.is_empty() {
-            return None;
+        if looted_from.is_empty() {
+            looted_from = if is_silver {
+                String::new()
+            } else {
+                "cadáver".into()
+            };
         }
-        let quantity = p.get(&5).and_then(PhotonValue::as_i64)? as i32;
+        let quantity = p.get(&qty_k).and_then(PhotonValue::as_i64)? as i32;
         if quantity <= 0 || quantity > 50_000 {
             return None;
         }
-        let item_num_id = p.get(&4).and_then(PhotonValue::as_i64).unwrap_or(0) as i32;
+        let item_num_id = p.get(&id_k).and_then(PhotonValue::as_i64).unwrap_or(0) as i32;
         if !is_silver && item_num_id <= 0 {
             return None;
         }
 
-        let (item_unique_name, item_name, enchantment) = if is_silver {
+        let enchant_param = p
+            .get(&6)
+            .or_else(|| p.get(&8))
+            .and_then(PhotonValue::as_i64)
+            .unwrap_or(0) as i32;
+
+        let (mut item_unique_name, item_name, mut enchantment) = if is_silver {
             ("SILVER".into(), "Silver".into(), 0)
         } else {
             self.resolve_item(item_num_id)
         };
+        if enchant_param > 0 {
+            enchantment = enchant_param;
+        }
+        if enchantment > 0 && !item_unique_name.contains('@') && item_unique_name != "SILVER" {
+            item_unique_name = format!("{item_unique_name}@{enchantment}");
+        }
 
         let guild = self
             .players_by_name
             .get(&looted_by)
-            .and_then(|p| p.guild.clone());
+            .and_then(|pl| pl.guild.clone());
 
         Some(SessionEvent::Loot(LootEvent {
             id: Uuid::new_v4().to_string(),
@@ -398,18 +433,49 @@ fn looks_like_player_name(s: &str) -> bool {
 
 fn looks_like_map(s: &str) -> bool {
     let t = s.trim();
-    if t.len() < 4 || t.len() > 64 {
+    if t.len() < 3 || t.len() > 80 {
         return false;
     }
-    t.contains("Cluster")
-        || t.contains("Black")
-        || t.contains("Outlands")
-        || t.contains("Roads")
-        || t.contains("Mists")
-        || t.contains("TNL")
-        || t.contains("RND")
-        || t.starts_with("T") && t.contains('-')
-        || t.contains('@')
+    let lower = t.to_ascii_lowercase();
+    const MARKERS: &[&str] = &[
+        "cluster",
+        "black",
+        "outlands",
+        "roads",
+        "mists",
+        "tnl",
+        "rnd",
+        "portal",
+        "city",
+        "ciudad",
+        "hideout",
+        "island",
+        "bridgewatch",
+        "martlock",
+        "thetford",
+        "lymhurst",
+        "sterling",
+        "caerleon",
+        "brecilien",
+        "steppe",
+        "highland",
+        "forest",
+        "mountain",
+        "swamp",
+        "yellow",
+        "red zone",
+        "gvg",
+        "hellgate",
+        "corrupted",
+        "avalon",
+    ];
+    if MARKERS.iter().any(|m| lower.contains(m)) {
+        return true;
+    }
+    if t.contains('@') || (t.contains('-') && t.len() >= 5) {
+        return true;
+    }
+    t.chars().all(|c| c.is_ascii_digit()) && t.len() >= 4
 }
 
 fn enchant_from_id(_id: i32) -> i32 {

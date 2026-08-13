@@ -11,6 +11,7 @@ export function demoLoot(): LootEvent[] {
     row(now - 120000, "Pichyluck", "NightWarden", "Siphoned Energy", "T4_SKILLBOOK_STANDARD", 12, 0, 96_000, map, guild),
     row(now - 90000, "RivenXe", "Pichyluck", "Master's Spear", "T6_2H_SPEAR", 1, 1, 640_000, map, guild),
     row(now - 70000, "MiraVoid", "Hooz20", "Grandmaster's Cape", "T7_CAPEITEM_FW_BRIDGEWATCH", 1, 0, 890_000, map, guild),
+    row(now - 55000, "Hooz20", "FallenKnight", "Trash", "T8_TRASH", 14, 0, 0, map, guild),
     row(now - 40000, "Hooz20", "MiraVoid", "Silver", "SILVER", 184_000, 0, 184_000, map, guild, true),
   ];
 }
