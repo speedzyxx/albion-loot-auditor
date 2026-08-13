@@ -21,6 +21,8 @@ pub struct CaptureStatus {
     pub error: Option<String>,
     pub map: Option<String>,
     pub clusters: u32,
+    #[serde(default)]
+    pub local_player: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -98,6 +100,8 @@ pub struct PlayerInfo {
     pub guild: Option<String>,
     pub alliance: Option<String>,
     pub object_id: Option<i32>,
+    #[serde(default)]
+    pub is_local: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

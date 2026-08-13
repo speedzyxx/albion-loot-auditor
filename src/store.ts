@@ -28,6 +28,7 @@ interface AppState {
   heals: CombatHit[];
   builds: Record<string, BuildInfo>;
   players: Record<string, PlayerInfo>;
+  localPlayer: string | null;
   map: string | null;
   chestText: string;
   parsedChest: ParsedChest | null;
@@ -44,9 +45,12 @@ interface AppState {
   addTrade: (event: TradeEvent) => void;
   addStorage: (event: StorageLog) => void;
   addDamage: (event: CombatHit) => void;
+  addDamageBatch: (events: CombatHit[]) => void;
   addHeal: (event: CombatHit) => void;
+  addHealBatch: (events: CombatHit[]) => void;
   upsertBuild: (build: BuildInfo) => void;
   upsertPlayer: (player: PlayerInfo) => void;
+  setLocalPlayer: (name: string | null) => void;
   setMap: (map: string) => void;
   setNpcap: (status: NpcapStatus) => void;
   setCapture: (status: CaptureStatus) => void;
@@ -54,6 +58,7 @@ interface AppState {
   setUpdateInfo: (info: string | null) => void;
   loadDemo: () => void;
   resetSession: () => void;
+  resetCombat: () => void;
 }
 
 const defaultSettings: AppSettings = {
@@ -76,6 +81,7 @@ export const useAppStore = create<AppState>()(
       heals: [],
       builds: {},
       players: {},
+      localPlayer: null,
       map: null,
       chestText: "",
       parsedChest: null,
@@ -100,16 +106,25 @@ export const useAppStore = create<AppState>()(
       addTrade: (event) => set((s) => ({ trades: [event, ...s.trades].slice(0, 2000) })),
       addStorage: (event) => set((s) => ({ storage: [event, ...s.storage].slice(0, 2000) })),
       addDamage: (event) => set((s) => ({ damage: [...s.damage, event].slice(-8000) })),
+      addDamageBatch: (events) =>
+        set((s) => (events.length ? { damage: [...s.damage, ...events].slice(-8000) } : s)),
       addHeal: (event) => set((s) => ({ heals: [...s.heals, event].slice(-8000) })),
+      addHealBatch: (events) =>
+        set((s) => (events.length ? { heals: [...s.heals, ...events].slice(-8000) } : s)),
       upsertBuild: (build) => set((s) => ({ builds: { ...s.builds, [build.player]: build } })),
       upsertPlayer: (player) =>
-        set((s) => ({ players: { ...s.players, [player.name]: player } })),
+        set((s) => ({
+          players: { ...s.players, [player.name]: player },
+          localPlayer: player.isLocal ? player.name : s.localPlayer,
+        })),
+      setLocalPlayer: (localPlayer) => set({ localPlayer }),
       setMap: (map) => set({ map }),
       setNpcap: (npcap) => set({ npcap }),
       setCapture: (capture) =>
         set((s) => ({
           capture,
           map: capture.map ?? s.map,
+          localPlayer: capture.localPlayer ?? s.localPlayer,
         })),
       setSettings: (patch) => set((s) => ({ settings: { ...s.settings, ...patch } })),
       setUpdateInfo: (updateInfo) => set({ updateInfo }),
@@ -135,10 +150,12 @@ export const useAppStore = create<AppState>()(
           heals: [],
           builds: {},
           players: {},
+          localPlayer: null,
           map: null,
           parsedChest: null,
           chestText: "",
         }),
+      resetCombat: () => set({ damage: [], heals: [], builds: {} }),
     }),
     {
       name: "ala-settings",

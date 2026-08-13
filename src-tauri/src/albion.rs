@@ -36,6 +36,8 @@ pub struct SessionWorld {
     pub players_by_id: BTreeMap<i32, PlayerInfo>,
     pub players_by_name: BTreeMap<String, PlayerInfo>,
     pub current_map: Option<String>,
+    pub local_name: Option<String>,
+    pub local_id: Option<i32>,
     /// objectId -> pending loot bag owner
     pub loot_owners: BTreeMap<i32, String>,
     pub item_names: BTreeMap<i32, (String, String, i32)>,
@@ -76,9 +78,7 @@ impl SessionWorld {
                         .get(&253)
                         .and_then(PhotonValue::as_i64)
                         .unwrap_or(operation_code as i64);
-                    if let Some(ev) = self.handle_operation(op, &parameters) {
-                        out.push(ev);
-                    }
+                    out.extend(self.handle_operation(op, &parameters));
                 }
                 PhotonMessage::Response {
                     operation_code,
@@ -89,9 +89,7 @@ impl SessionWorld {
                         .get(&253)
                         .and_then(PhotonValue::as_i64)
                         .unwrap_or(operation_code as i64);
-                    if let Some(ev) = self.handle_operation(op, &parameters) {
-                        out.push(ev);
-                    }
+                    out.extend(self.handle_operation(op, &parameters));
                 }
             }
         }
@@ -128,42 +126,61 @@ impl SessionWorld {
         &mut self,
         op: i64,
         p: &BTreeMap<u8, PhotonValue>,
-    ) -> Option<SessionEvent> {
+    ) -> Vec<SessionEvent> {
+        let mut out = Vec::new();
         if let Some(ev) = self.try_cluster(p, Some(op)) {
-            return Some(ev);
+            out.push(ev);
         }
         if let Some(ev) = self.try_join_self(p) {
-            return Some(ev);
+            out.push(ev);
         }
-        self.try_trade(p)
+        if let Some(ev) = self.try_trade(p) {
+            out.push(ev);
+        }
+        out
     }
 
     fn try_join_self(&mut self, p: &BTreeMap<u8, PhotonValue>) -> Option<SessionEvent> {
-        // OpJoin response: player name in 2, guild in 57 (ao-loot-logger).
+        // Albion Analytics JoinResponse: 0=objectId, 1=guid, 2=username, 8=mapId, 58=guild, 79=alliance.
         let name = p.get(&2).and_then(PhotonValue::as_str)?.to_string();
         if !looks_like_player_name(&name) {
             return None;
         }
-        if p.get(&1).and_then(PhotonValue::as_str).is_some() {
+        // Join always carries mapId at 8. Without it this is some other op with a name at 2.
+        if self.cluster_from_value(p.get(&8)).is_none()
+            && p.get(&8)
+                .and_then(PhotonValue::as_str)
+                .map(|s| s.contains('@'))
+                != Some(true)
+        {
             return None;
         }
-        let object_id = p.get(&0).and_then(PhotonValue::as_object_id);
+        let object_id = p.get(&0).and_then(PhotonValue::as_i64).and_then(|n| {
+            i32::try_from(n).ok().filter(|id| *id != 0)
+        });
         let guild = p
-            .get(&57)
-            .or_else(|| p.get(&8))
+            .get(&58)
+            .or_else(|| p.get(&57))
             .and_then(PhotonValue::as_str)
+            .map(|s| s.trim())
             .filter(|s| !s.is_empty())
+            .filter(|s| self.clusters.resolve(s).is_none())
+            .filter(|s| !s.chars().all(|c| c.is_ascii_digit()))
             .map(|s| s.to_string());
         let info = PlayerInfo {
             name: name.clone(),
             guild,
             alliance: p
-                .get(&77)
+                .get(&79)
+                .or_else(|| p.get(&77))
                 .and_then(PhotonValue::as_str)
                 .filter(|s| !s.is_empty())
                 .map(|s| s.to_string()),
             object_id,
+            is_local: true,
         };
+        self.local_name = Some(name.clone());
+        self.local_id = object_id;
         self.players_by_name.insert(name, info.clone());
         if let Some(id) = object_id {
             self.players_by_id.insert(id, info.clone());
@@ -289,7 +306,15 @@ impl SessionWorld {
             guild,
             alliance,
             object_id,
+            is_local: self.local_id.is_some() && self.local_id == object_id,
         };
+        if info.is_local {
+            self.players_by_name.insert(name.clone(), info.clone());
+            if let Some(id) = object_id {
+                self.players_by_id.insert(id, info.clone());
+            }
+            return Some(SessionEvent::Player(info));
+        }
         self.players_by_name.insert(name, info.clone());
         if let Some(id) = object_id {
             self.players_by_id.insert(id, info.clone());
@@ -298,17 +323,21 @@ impl SessionWorld {
     }
 
     fn try_cluster(&mut self, p: &BTreeMap<u8, PhotonValue>, op: Option<i64>) -> Option<SessionEvent> {
-        // Only Join (2) and ChangeCluster (35/41). Other ops reuse param 8 for
-        // object ids that collide with royal-zone indexes (1012 = Merlyn's Rest).
         if p.contains_key(&252) {
             return None;
         }
-        let op = op.or_else(|| p.get(&253).and_then(PhotonValue::as_i64))?;
-
-        let (cluster_id, name) = match op {
-            2 => self.cluster_from_join(p)?,
-            35 | 41 => self.cluster_from_change(p)?,
-            _ => return None,
+        let op = op.or_else(|| p.get(&253).and_then(PhotonValue::as_i64));
+        let join_shape = self.cluster_from_join(p).is_some()
+            && p.get(&2)
+                .and_then(PhotonValue::as_str)
+                .is_some_and(looks_like_player_name);
+        // Analytics: Join=2 (mapId @ 8). ChangeCluster live code is 36 (index @ 0); 35/41 are older patches.
+        let (cluster_id, name) = if matches!(op, Some(2)) || join_shape {
+            self.cluster_from_join(p)?
+        } else if matches!(op, Some(35) | Some(36) | Some(41)) {
+            self.cluster_from_change(p)?
+        } else {
+            return None;
         };
 
         let map = if name.to_ascii_lowercase().contains(&cluster_id.to_ascii_lowercase()) {
@@ -320,11 +349,22 @@ impl SessionWorld {
             return None;
         }
         self.current_map = Some(map.clone());
+        self.prune_entities_keep_local();
         Some(SessionEvent::Cluster(ClusterInfo {
             map,
             cluster_id: Some(cluster_id),
             timestamp: now_ms(),
         }))
+    }
+
+    fn prune_entities_keep_local(&mut self) {
+        let local_id = self.local_id;
+        let local_name = self.local_name.clone();
+        self.players_by_id.retain(|id, _| Some(*id) == local_id);
+        self.players_by_name
+            .retain(|name, _| local_name.as_deref() == Some(name.as_str()));
+        self.loot_owners.clear();
+        self.last_health.clear();
     }
 
     fn cluster_from_join(&self, p: &BTreeMap<u8, PhotonValue>) -> Option<(String, String)> {
@@ -538,7 +578,9 @@ impl SessionWorld {
         })?;
         let target_known = self.players_by_id.contains_key(&target_id);
         let causer_known = self.players_by_id.contains_key(&causer_id);
-        if !target_known && !causer_known {
+        let local_involved =
+            self.local_id == Some(target_id) || self.local_id == Some(causer_id);
+        if !target_known && !causer_known && !local_involved {
             return None;
         }
         let amount = delta.abs().round() as i64;

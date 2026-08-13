@@ -13,7 +13,7 @@ use tauri::{AppHandle, Emitter};
 
 const FILTER: &str = "ip and udp and (port 5056 or port 5055 or port 5058 or port 4535)";
 const SNAPLEN: c_int = 65535;
-const TIMEOUT_MS: c_int = 50;
+const TIMEOUT_MS: c_int = 1;
 const PCAP_ERRBUF: usize = 256;
 
 #[repr(C)]
@@ -115,6 +115,7 @@ pub struct CaptureEngine {
     last_error: Arc<Mutex<Option<String>>>,
     current_map: Arc<Mutex<Option<String>>>,
     clusters: Arc<Mutex<u32>>,
+    local_player: Arc<Mutex<Option<String>>>,
 }
 
 impl CaptureEngine {
@@ -128,6 +129,7 @@ impl CaptureEngine {
             last_error: Arc::new(Mutex::new(None)),
             current_map: Arc::new(Mutex::new(None)),
             clusters: Arc::new(Mutex::new(0)),
+            local_player: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -142,6 +144,7 @@ impl CaptureEngine {
             error: self.last_error.lock().clone(),
             map: self.current_map.lock().clone(),
             clusters: *self.clusters.lock(),
+            local_player: self.local_player.lock().clone(),
         }
     }
 
@@ -172,6 +175,7 @@ impl CaptureEngine {
         let last_error = self.last_error.clone();
         let current_map = self.current_map.clone();
         let clusters = self.clusters.clone();
+        let local_player = self.local_player.clone();
 
         thread::spawn(move || {
             if let Err(err) = capture_loop(
@@ -184,6 +188,7 @@ impl CaptureEngine {
                 devices,
                 current_map,
                 clusters,
+                local_player,
             ) {
                 *last_error.lock() = Some(err);
             }
@@ -204,6 +209,7 @@ fn capture_loop(
     devices: Arc<Mutex<Vec<String>>>,
     current_map: Arc<Mutex<Option<String>>>,
     clusters: Arc<Mutex<u32>>,
+    local_player: Arc<Mutex<Option<String>>>,
 ) -> Result<(), String> {
     let names = unsafe { list_devices(&api)? };
     *devices.lock() = names.clone();
@@ -276,40 +282,37 @@ fn capture_loop(
         let mut saw = false;
         for (handle, link) in &handles {
             unsafe {
-                let mut hdr: *mut PcapPkthdr = ptr::null_mut();
-                let mut data: *const u8 = ptr::null();
-                let rc = (api.next_ex)(*handle, &mut hdr, &mut data);
-                if rc != 1 || hdr.is_null() || data.is_null() {
-                    continue;
-                }
-                let caplen = (*hdr).caplen as usize;
-                if caplen == 0 || caplen > 65535 {
-                    continue;
-                }
-                let frame = std::slice::from_raw_parts(data, caplen);
-                saw = true;
-                packets.fetch_add(1, Ordering::Relaxed);
-                last_packet = std::time::Instant::now();
-                live.store(true, Ordering::Relaxed);
-
-                if let Some(udp) = extract_udp(frame, *link) {
-                    let messages = parser.handle_udp(udp);
-                    if messages.is_empty() {
+                loop {
+                    let mut hdr: *mut PcapPkthdr = ptr::null_mut();
+                    let mut data: *const u8 = ptr::null();
+                    let rc = (api.next_ex)(*handle, &mut hdr, &mut data);
+                    if rc != 1 || hdr.is_null() || data.is_null() {
+                        break;
+                    }
+                    let caplen = (*hdr).caplen as usize;
+                    if caplen == 0 || caplen > 65535 {
                         continue;
                     }
-                    decoded.fetch_add(messages.len() as u64, Ordering::Relaxed);
-                    let events = world.ingest(messages);
-                    for event in events {
-                        if let SessionEvent::Cluster(info) = &event {
-                            *current_map.lock() = Some(info.map.clone());
+                    let frame = std::slice::from_raw_parts(data, caplen);
+                    saw = true;
+                    packets.fetch_add(1, Ordering::Relaxed);
+                    last_packet = std::time::Instant::now();
+                    live.store(true, Ordering::Relaxed);
+
+                    if let Some(udp) = extract_udp(frame, *link) {
+                        let messages = parser.handle_udp(udp);
+                        if messages.is_empty() {
+                            continue;
                         }
-                        emit_event(&app, event);
+                        decoded.fetch_add(messages.len() as u64, Ordering::Relaxed);
+                        let events = world.ingest(messages);
+                        emit_events(&app, events, &current_map, &local_player);
                     }
                 }
             }
         }
         if !saw {
-            thread::sleep(Duration::from_millis(5));
+            thread::sleep(Duration::from_millis(1));
         }
         if last_packet.elapsed() > Duration::from_secs(6) {
             live.store(false, Ordering::Relaxed);
@@ -322,6 +325,39 @@ fn capture_loop(
         }
     }
     Ok(())
+}
+
+fn emit_events(
+    app: &AppHandle,
+    events: Vec<SessionEvent>,
+    current_map: &Mutex<Option<String>>,
+    local_player: &Mutex<Option<String>>,
+) {
+    let mut damage = Vec::new();
+    let mut heals = Vec::new();
+    for event in events {
+        match event {
+            SessionEvent::Cluster(info) => {
+                *current_map.lock() = Some(info.map.clone());
+                let _ = app.emit("cluster", SessionEvent::Cluster(info));
+            }
+            SessionEvent::Player(info) => {
+                if info.is_local {
+                    *local_player.lock() = Some(info.name.clone());
+                }
+                let _ = app.emit("player", SessionEvent::Player(info));
+            }
+            SessionEvent::Damage(hit) => damage.push(hit),
+            SessionEvent::Heal(hit) => heals.push(hit),
+            other => emit_event(app, other),
+        }
+    }
+    if !damage.is_empty() {
+        let _ = app.emit("damage-batch", &damage);
+    }
+    if !heals.is_empty() {
+        let _ = app.emit("heal-batch", &heals);
+    }
 }
 
 fn emit_event(app: &AppHandle, event: SessionEvent) {

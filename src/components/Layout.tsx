@@ -34,6 +34,7 @@ export function Layout({ children }: { children: ReactNode }) {
   const capture = useAppStore((s) => s.capture);
   const updateInfo = useAppStore((s) => s.updateInfo);
   const map = useAppStore((s) => s.map);
+  const localPlayer = useAppStore((s) => s.localPlayer);
 
   return (
     <div className="flex h-full text-slate-100">
@@ -89,10 +90,11 @@ export function Layout({ children }: { children: ReactNode }) {
               className="w-full rounded-lg border border-white/10 bg-ink-900 py-2 pl-10 pr-3 text-sm outline-none ring-gold-500/40 placeholder:text-slate-600 focus:ring-2"
             />
           </div>
-          <div className="hidden min-w-[220px] items-center gap-2 rounded-lg border border-cyan-400/20 bg-cyan-400/10 px-3 py-2 text-xs text-cyan-200 md:flex">
+          <div className="hidden min-w-[260px] items-center gap-2 rounded-lg border border-cyan-400/20 bg-cyan-400/10 px-3 py-2 text-xs text-cyan-200 md:flex">
             <Activity size={14} className="text-cyan-400" />
             <span className="truncate font-medium">
-              {map ?? "Sin cluster — cruza un portal o relogea (Join)"}
+              {localPlayer ? `${localPlayer} · ` : ""}
+              {map ?? "Sin cluster — cruza un portal o relogea"}
             </span>
           </div>
         </header>

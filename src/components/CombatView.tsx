@@ -1,4 +1,4 @@
-import { Flame, Heart, Sparkles, Trash2 } from "lucide-react";
+import { Flame, Heart, RotateCcw, Sparkles } from "lucide-react";
 import { useMemo } from "react";
 import { useAppStore } from "../store";
 import { formatTime } from "../lib/format";
@@ -11,8 +11,9 @@ export function CombatView() {
   const builds = useAppStore((s) => s.builds);
   const query = useAppStore((s) => s.query);
   const map = useAppStore((s) => s.map);
+  const localPlayer = useAppStore((s) => s.localPlayer);
   const loadDemo = useAppStore((s) => s.loadDemo);
-  const resetSession = useAppStore((s) => s.resetSession);
+  const resetCombat = useAppStore((s) => s.resetCombat);
 
   const q = query.trim().toLowerCase();
   const dmgRows = useMemo(() => meter(damage, "source", q), [damage, q]);
@@ -39,7 +40,10 @@ export function CombatView() {
         <div>
           <h1 className="font-display text-3xl font-bold">Combate</h1>
           <p className="text-sm text-slate-500">
-            Daño, curación y builds de todos los jugadores visibles. Mapa:{" "}
+            Daño, curación y builds. Personaje:{" "}
+            <span className="text-gold-400">{localPlayer ?? "esperando Join de tu cuenta"}</span>
+            {" · "}
+            Mapa:{" "}
             <span className="text-cyan-300">{map ?? "cambia de mapa (portal) para fijar el cluster"}</span>
           </p>
         </div>
@@ -51,10 +55,10 @@ export function CombatView() {
             <Sparkles size={14} /> Demo ZvZ
           </button>
           <button
-            onClick={resetSession}
+            onClick={resetCombat}
             className="inline-flex items-center gap-2 rounded-lg border border-white/10 px-3 py-2 text-xs hover:bg-white/5"
           >
-            <Trash2 size={14} /> Limpiar
+            <RotateCcw size={14} /> Reset daño / builds
           </button>
         </div>
       </div>

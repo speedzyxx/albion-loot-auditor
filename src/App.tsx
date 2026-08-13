@@ -34,7 +34,9 @@ export default function App() {
   const addTrade = useAppStore((s) => s.addTrade);
   const addStorage = useAppStore((s) => s.addStorage);
   const addDamage = useAppStore((s) => s.addDamage);
+  const addDamageBatch = useAppStore((s) => s.addDamageBatch);
   const addHeal = useAppStore((s) => s.addHeal);
+  const addHealBatch = useAppStore((s) => s.addHealBatch);
   const upsertBuild = useAppStore((s) => s.upsertBuild);
   const upsertPlayer = useAppStore((s) => s.upsertPlayer);
   const setMap = useAppStore((s) => s.setMap);
@@ -72,16 +74,34 @@ export default function App() {
         const p = e.payload as { damage?: CombatHit } & CombatHit;
         addDamage(p.damage ?? p);
       });
+      const onDamageBatch = await listen<CombatHit[]>("damage-batch", (e) => {
+        addDamageBatch(e.payload ?? []);
+      });
       const onHeal = await listen<{ heal?: CombatHit } & CombatHit>("heal", (e) => {
         const p = e.payload as { heal?: CombatHit } & CombatHit;
         addHeal(p.heal ?? p);
+      });
+      const onHealBatch = await listen<CombatHit[]>("heal-batch", (e) => {
+        addHealBatch(e.payload ?? []);
       });
       const onBuild = await listen<{ build?: BuildInfo } & BuildInfo>("build", (e) => {
         const p = e.payload as { build?: BuildInfo } & BuildInfo;
         upsertBuild(p.build ?? p);
       });
 
-      unlisteners = [onLoot, onDeath, onTrade, onStorage, onPlayer, onCluster, onDamage, onHeal, onBuild];
+      unlisteners = [
+        onLoot,
+        onDeath,
+        onTrade,
+        onStorage,
+        onPlayer,
+        onCluster,
+        onDamage,
+        onDamageBatch,
+        onHeal,
+        onHealBatch,
+        onBuild,
+      ];
 
       try {
         const npcap = await invoke<NpcapStatus>("npcap_status");
@@ -128,7 +148,7 @@ export default function App() {
       } catch {
         /* ignore */
       }
-    }, 2000);
+    }, 750);
 
     return () => {
       window.clearInterval(poll);
@@ -137,7 +157,9 @@ export default function App() {
   }, [
     addDeath,
     addDamage,
+    addDamageBatch,
     addHeal,
+    addHealBatch,
     addLoot,
     addStorage,
     addTrade,

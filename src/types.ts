@@ -26,6 +26,7 @@ export interface CaptureStatus {
   error?: string | null;
   map?: string | null;
   clusters?: number;
+  localPlayer?: string | null;
 }
 
 export interface LootEvent {
@@ -91,6 +92,7 @@ export interface PlayerInfo {
   guild?: string | null;
   alliance?: string | null;
   objectId?: number | null;
+  isLocal?: boolean;
 }
 
 export interface CombatHit {
