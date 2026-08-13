@@ -1,5 +1,6 @@
 import type { AuditResult, DeathEvent, LootEvent, TradeEvent } from "../types";
 import { displayItem, formatSilver } from "./format";
+import { groupLootByMapAndGuild, groupPlayersByGuild } from "./lootGroups";
 
 export function buildDiscordReport(opts: {
   title: string;
@@ -9,24 +10,43 @@ export function buildDiscordReport(opts: {
   deaths: DeathEvent[];
   trades: TradeEvent[];
 }): string {
-  const { title, map, audit, deaths, trades } = opts;
+  const { title, map, audit, deaths, trades, loot } = opts;
   const rats = audit.players.filter((p) => p.status === "pending");
   const complete = audit.players.filter((p) => p.status === "complete");
   const xfer = audit.players.filter((p) => p.status === "transferred");
+  const byMap = groupLootByMapAndGuild(loot);
+  const byGuild = groupPlayersByGuild(audit.players);
 
   const lines: string[] = [
     `**${title}**`,
-    map ? `Mapa: \`${map}\`` : "",
+    map ? `Mapa actual: \`${map}\`` : "",
     `Loot total: **${formatSilver(audit.lootSilver)}** · Cofre: **${formatSilver(audit.chestSilver)}** · Cumplimiento: **${audit.compliance}%**`,
     `Jugadores: ${complete.length} 🟢 · ${xfer.length} 🟡 · ${rats.length} 🔴`,
     "",
   ];
 
+  if (byMap.length) {
+    lines.push("**Mapas donde se loteó**");
+    for (const zone of byMap) {
+      lines.push(`• **${zone.map}** — ${zone.events} picks · ${zone.looters} looters · ${zone.guilds.length} gremios`);
+      for (const g of zone.guilds) {
+        const names = g.members.map((m) => `${m.player} (${m.events.length})`).join(", ");
+        lines.push(`  – ${g.guild}: ${names}`);
+      }
+    }
+    lines.push("");
+  }
+
   if (rats.length) {
     lines.push("**🔴 Pendiente / RAT**");
-    for (const p of rats) {
-      const items = p.pending.map((i) => displayItem(i.name, i.enchantment, i.quantity)).join(", ");
-      lines.push(`• **${p.player}** — ${items || "ítems sin depositar"} (${formatSilver(p.pendingSilver)})`);
+    for (const g of byGuild) {
+      const pending = g.players.filter((p) => p.status === "pending");
+      if (!pending.length) continue;
+      lines.push(`*${g.guild}*`);
+      for (const p of pending) {
+        const items = p.pending.map((i) => displayItem(i.name, i.enchantment, i.quantity)).join(", ");
+        lines.push(`• **${p.player}** — ${items || "ítems sin depositar"} (${formatSilver(p.pendingSilver)})`);
+      }
     }
     lines.push("");
   }

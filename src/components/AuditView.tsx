@@ -1,8 +1,10 @@
 import { useMemo } from "react";
+import { Users } from "lucide-react";
 import { useAppStore } from "../store";
 import { parseChestPaste } from "../lib/chestParser";
 import { reconcile } from "../lib/audit";
 import { displayItem, formatSilver, cn } from "../lib/format";
+import { groupPlayersByGuild } from "../lib/lootGroups";
 import { ItemIcon } from "./ItemIcon";
 import type { ItemDelta } from "../types";
 
@@ -20,6 +22,7 @@ export function AuditView() {
   const loot = useAppStore((s) => s.loot);
   const trades = useAppStore((s) => s.trades);
   const officers = useAppStore((s) => s.settings.officers);
+  const preferGuild = useAppStore((s) => s.settings.guildFilter);
   const query = useAppStore((s) => s.query);
 
   const parsed = useMemo(
@@ -42,6 +45,7 @@ export function AuditView() {
     if (!q) return true;
     return p.player.toLowerCase().includes(q) || (p.guild ?? "").toLowerCase().includes(q);
   });
+  const guilds = useMemo(() => groupPlayersByGuild(players, preferGuild), [players, preferGuild]);
 
   return (
     <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_380px]">
@@ -49,50 +53,62 @@ export function AuditView() {
         <div>
           <h1 className="font-display text-3xl font-bold">Conciliación de cofre</h1>
           <p className="text-sm text-slate-500">
-            Primero ves solo lo loteado. Cuando pegas el cofre, cada ítem pasa a{" "}
+            Primero ves solo lo loteado, dividido por gremio y miembro. Cuando pegas el cofre, cada ítem pasa a{" "}
             <span className="text-emerald-300">está en el cofre</span> o{" "}
             <span className="text-rose-300">no está</span>.
           </p>
         </div>
-        <div className="space-y-2">
-          {players.map((p) => {
-            const st = STATUS[p.status];
-            return (
-              <div key={p.player} className="rounded-xl border border-white/10 bg-ink-800/70 p-4">
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <div className="font-display text-xl font-bold">{p.player}</div>
-                    <div className="text-xs text-slate-500">{p.guild ?? "sin gremio"}</div>
-                  </div>
-                  <span className={cn("rounded-full px-3 py-1 text-xs font-semibold", st.className)}>
-                    {st.icon} {st.label}
-                  </span>
+        <div className="space-y-5">
+          {guilds.map((g) => (
+            <section key={g.guild}>
+              <div className="mb-2 flex items-center justify-between">
+                <div className="flex items-center gap-2 font-display text-lg font-bold text-gold-400">
+                  <Users size={16} />
+                  {g.guild}
                 </div>
-                {!audit.chestReady && (
-                  <ItemList
-                    title="Loot de cadáver"
-                    items={p.looted}
-                    empty="Sin ítems de combate"
-                    tone="neutral"
-                  />
-                )}
-                {audit.chestReady && (
-                  <>
-                    <div className="mt-3 grid grid-cols-3 gap-3 text-xs">
-                      <Meta label="Loteado" value={formatSilver(p.lootedSilver)} />
-                      <Meta label="En cofre" value={formatSilver(p.depositedSilver)} />
-                      <Meta label="Falta" value={formatSilver(p.pendingSilver)} />
-                    </div>
-                    <ItemList title="Está en el cofre" items={p.deposited} empty="Nada depositado" tone="ok" />
-                    <ItemList title="No está en el cofre" items={p.pending} empty="Nada pendiente" tone="bad" />
-                  </>
-                )}
-                {p.transferred.length > 0 && (
-                  <ItemList title="Transferido a oficial" items={p.transferred} empty="" tone="warn" />
-                )}
+                <div className="text-xs text-slate-500">
+                  {g.players.length} miembro{g.players.length === 1 ? "" : "s"} · {formatSilver(g.silver)}
+                </div>
               </div>
-            );
-          })}
+              <div className="space-y-2">
+                {g.players.map((p) => {
+                  const st = STATUS[p.status];
+                  return (
+                    <div key={p.player} className="rounded-xl border border-white/10 bg-ink-800/70 p-4">
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="font-display text-xl font-bold">{p.player}</div>
+                        <span className={cn("rounded-full px-3 py-1 text-xs font-semibold", st.className)}>
+                          {st.icon} {st.label}
+                        </span>
+                      </div>
+                      {!audit.chestReady && (
+                        <ItemList
+                          title="Loot de cadáver"
+                          items={p.looted}
+                          empty="Sin ítems de combate"
+                          tone="neutral"
+                        />
+                      )}
+                      {audit.chestReady && (
+                        <>
+                          <div className="mt-3 grid grid-cols-3 gap-3 text-xs">
+                            <Meta label="Loteado" value={formatSilver(p.lootedSilver)} />
+                            <Meta label="En cofre" value={formatSilver(p.depositedSilver)} />
+                            <Meta label="Falta" value={formatSilver(p.pendingSilver)} />
+                          </div>
+                          <ItemList title="Está en el cofre" items={p.deposited} empty="Nada depositado" tone="ok" />
+                          <ItemList title="No está en el cofre" items={p.pending} empty="Nada pendiente" tone="bad" />
+                        </>
+                      )}
+                      {p.transferred.length > 0 && (
+                        <ItemList title="Transferido a oficial" items={p.transferred} empty="" tone="warn" />
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </section>
+          ))}
           {players.length === 0 && (
             <div className="rounded-xl border border-dashed border-white/10 px-6 py-16 text-center text-slate-500">
               Todavía no hay loot de cadáver. Recoge ítems en el mundo; el banco no cuenta.
