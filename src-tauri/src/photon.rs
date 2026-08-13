@@ -76,6 +76,23 @@ impl PhotonValue {
             _ => None,
         }
     }
+
+    pub fn as_f64(&self) -> Option<f64> {
+        match self {
+            PhotonValue::Float(f) => Some(*f),
+            PhotonValue::Number(n) => Some(*n as f64),
+            _ => None,
+        }
+    }
+
+    pub fn as_object_id(&self) -> Option<i32> {
+        match self {
+            PhotonValue::Number(n) if *n != 0 && *n > i32::MIN as i64 && *n < i32::MAX as i64 => {
+                Some(*n as i32)
+            }
+            _ => None,
+        }
+    }
 }
 
 struct Reader<'a> {

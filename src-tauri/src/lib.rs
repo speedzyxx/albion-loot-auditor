@@ -5,6 +5,7 @@ mod models;
 mod npcap;
 mod photon;
 mod prices;
+mod world;
 
 use capture::CaptureEngine;
 use models::{CaptureStatus, DiscordPayload, NpcapStatus, PriceQuote};

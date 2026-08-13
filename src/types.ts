@@ -1,4 +1,11 @@
-export type ViewId = "live" | "audit" | "deaths" | "trades" | "reports" | "settings";
+export type ViewId =
+  | "live"
+  | "audit"
+  | "combat"
+  | "deaths"
+  | "trades"
+  | "reports"
+  | "settings";
 
 export type PlayerStatus = "complete" | "transferred" | "pending";
 
@@ -17,6 +24,7 @@ export interface CaptureStatus {
   decoded: number;
   live: boolean;
   error?: string | null;
+  map?: string | null;
 }
 
 export interface LootEvent {
@@ -82,6 +90,28 @@ export interface PlayerInfo {
   guild?: string | null;
   alliance?: string | null;
   objectId?: number | null;
+}
+
+export interface CombatHit {
+  id: string;
+  timestamp: number;
+  source: string;
+  target: string;
+  amount: number;
+  map?: string | null;
+}
+
+export interface GearPiece {
+  itemName: string;
+  itemUniqueName: string;
+  enchantment: number;
+}
+
+export interface BuildInfo {
+  player: string;
+  guild?: string | null;
+  items: GearPiece[];
+  timestamp: number;
 }
 
 export interface ChestItem {

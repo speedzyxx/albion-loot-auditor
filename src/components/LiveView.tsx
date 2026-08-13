@@ -41,7 +41,7 @@ export function LiveView() {
         <div>
           <h1 className="font-display text-3xl font-bold">Combat loot</h1>
           <p className="text-sm text-slate-500">
-            Mapa: <span className="text-cyan-300">{map ?? "esperando cambio de cluster"}</span>
+            Mapa: <span className="text-cyan-300">{map ?? "esperando cluster (portal o cambio de mapa)"}</span>
             {" · "}
             Solo cuenta loot de cadáveres en el mundo, no el banco de ciudad.
           </p>
@@ -92,7 +92,10 @@ export function LiveView() {
                       Sal de la ciudad, mata / entra a un ZvZ y <strong className="text-slate-300">recoge ítems de un cadáver</strong>{" "}
                       (incluido trash). Mover cosas en el banco no genera eventos de loot.
                     </p>
-                    <p className="text-xs">O pulsa Demo ZvZ para ver iconos y filas de ejemplo.</p>
+                    <p className="text-xs">
+                      Daño, curación y builds van al apartado <strong className="text-slate-300">Combate</strong>. O pulsa Demo ZvZ
+                      para ver iconos y filas de ejemplo.
+                    </p>
                   </div>
                 </td>
               </tr>

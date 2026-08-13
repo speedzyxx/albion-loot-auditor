@@ -19,6 +19,7 @@ pub struct CaptureStatus {
     pub decoded: u64,
     pub live: bool,
     pub error: Option<String>,
+    pub map: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -110,6 +111,34 @@ pub struct ClusterInfo {
 pub struct DiscordPayload {
     pub webhook_url: String,
     pub content: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CombatHit {
+    pub id: String,
+    pub timestamp: i64,
+    pub source: String,
+    pub target: String,
+    pub amount: i64,
+    pub map: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GearPiece {
+    pub item_name: String,
+    pub item_unique_name: String,
+    pub enchantment: i32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BuildInfo {
+    pub player: String,
+    pub guild: Option<String>,
+    pub items: Vec<GearPiece>,
+    pub timestamp: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

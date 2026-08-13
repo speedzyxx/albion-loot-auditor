@@ -8,9 +8,11 @@
 //! parameter 252.
 
 use crate::models::{
-    ClusterInfo, DeathEvent, LootEvent, LostItem, PlayerInfo, StorageLog, TradeEvent,
+    BuildInfo, ClusterInfo, CombatHit, DeathEvent, GearPiece, LootEvent, LostItem, PlayerInfo,
+    StorageLog, TradeEvent,
 };
 use crate::photon::{PhotonMessage, PhotonValue};
+use crate::world::ClusterBook;
 use serde::Serialize;
 use std::collections::BTreeMap;
 use uuid::Uuid;
@@ -24,6 +26,9 @@ pub enum SessionEvent {
     Storage(StorageLog),
     Player(PlayerInfo),
     Cluster(ClusterInfo),
+    Damage(CombatHit),
+    Heal(CombatHit),
+    Build(BuildInfo),
 }
 
 #[derive(Default)]
@@ -34,6 +39,8 @@ pub struct SessionWorld {
     /// objectId -> pending loot bag owner
     pub loot_owners: BTreeMap<i32, String>,
     pub item_names: BTreeMap<i32, (String, String, i32)>,
+    pub last_health: BTreeMap<i32, i64>,
+    pub clusters: ClusterBook,
 }
 
 impl SessionWorld {
@@ -52,13 +59,35 @@ impl SessionWorld {
                     if let Some(ev) = self.handle_event(game_code, &parameters) {
                         out.push(ev);
                     }
+                    if let Some(ev) = self.try_cluster(&parameters) {
+                        if !matches!(out.last(), Some(SessionEvent::Cluster(_))) {
+                            out.push(ev);
+                        }
+                    }
+                    if let Some(ev) = self.try_combat_hit(&parameters) {
+                        out.push(ev);
+                    } else if let Some(ev) = self.try_health(&parameters) {
+                        out.push(ev);
+                    }
+                    if let Some(ev) = self.try_build(&parameters) {
+                        out.push(ev);
+                    }
                 }
                 PhotonMessage::Request {
                     operation_code,
                     parameters,
                 } => {
-                    if let Some(ev) = self.handle_operation(operation_code, &parameters) {
+                    let op = parameters
+                        .get(&253)
+                        .and_then(PhotonValue::as_i64)
+                        .unwrap_or(operation_code as i64);
+                    if let Some(ev) = self.handle_operation(op, &parameters) {
                         out.push(ev);
+                    }
+                    if let Some(ev) = self.try_cluster(&parameters) {
+                        if !matches!(out.last(), Some(SessionEvent::Cluster(_))) {
+                            out.push(ev);
+                        }
                     }
                 }
                 PhotonMessage::Response {
@@ -66,8 +95,17 @@ impl SessionWorld {
                     parameters,
                     ..
                 } => {
-                    if let Some(ev) = self.handle_operation(operation_code, &parameters) {
+                    let op = parameters
+                        .get(&253)
+                        .and_then(PhotonValue::as_i64)
+                        .unwrap_or(operation_code as i64);
+                    if let Some(ev) = self.handle_operation(op, &parameters) {
                         out.push(ev);
+                    }
+                    if let Some(ev) = self.try_cluster(&parameters) {
+                        if !matches!(out.last(), Some(SessionEvent::Cluster(_))) {
+                            out.push(ev);
+                        }
                     }
                 }
             }
@@ -106,13 +144,49 @@ impl SessionWorld {
 
     fn handle_operation(
         &mut self,
-        _op: u8,
+        _op: i64,
         p: &BTreeMap<u8, PhotonValue>,
     ) -> Option<SessionEvent> {
         if let Some(ev) = self.try_cluster(p) {
             return Some(ev);
         }
+        if let Some(ev) = self.try_join_self(p) {
+            return Some(ev);
+        }
         self.try_trade(p)
+    }
+
+    fn try_join_self(&mut self, p: &BTreeMap<u8, PhotonValue>) -> Option<SessionEvent> {
+        // OpJoin response: player name in 2, guild in 57 (ao-loot-logger).
+        let name = p.get(&2).and_then(PhotonValue::as_str)?.to_string();
+        if !looks_like_player_name(&name) {
+            return None;
+        }
+        if p.get(&1).and_then(PhotonValue::as_str).is_some() {
+            return None;
+        }
+        let object_id = p.get(&0).and_then(PhotonValue::as_object_id);
+        let guild = p
+            .get(&57)
+            .or_else(|| p.get(&8))
+            .and_then(PhotonValue::as_str)
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string());
+        let info = PlayerInfo {
+            name: name.clone(),
+            guild,
+            alliance: p
+                .get(&77)
+                .and_then(PhotonValue::as_str)
+                .filter(|s| !s.is_empty())
+                .map(|s| s.to_string()),
+            object_id,
+        };
+        self.players_by_name.insert(name, info.clone());
+        if let Some(id) = object_id {
+            self.players_by_id.insert(id, info.clone());
+        }
+        Some(SessionEvent::Player(info))
     }
 
     fn try_loot(&self, p: &BTreeMap<u8, PhotonValue>) -> Option<SessionEvent> {
@@ -211,7 +285,7 @@ impl SessionWorld {
             return None;
         }
         // NewCharacter typically has an object id in param 0 and a guild string in 8.
-        let object_id = p.get(&0).and_then(PhotonValue::as_i64).map(|v| v as i32);
+        let object_id = p.get(&0).and_then(PhotonValue::as_object_id);
         let guild = p
             .get(&8)
             .and_then(PhotonValue::as_str)
@@ -242,20 +316,39 @@ impl SessionWorld {
     }
 
     fn try_cluster(&mut self, p: &BTreeMap<u8, PhotonValue>) -> Option<SessionEvent> {
-        let map = ["0", "1", "255"]
-            .iter()
-            .filter_map(|k| {
-                let id: u8 = k.parse().ok()?;
-                p.get(&id).and_then(PhotonValue::as_str)
-            })
-            .find(|s| looks_like_map(s))
-            .or_else(|| {
-                p.values()
-                    .filter_map(PhotonValue::as_str)
-                    .find(|s| looks_like_map(s))
-            })?
-            .to_string();
+        let mut found: Option<String> = None;
 
+        for key in [0u8, 1, 2, 8, 255] {
+            if let Some(s) = p.get(&key).and_then(PhotonValue::as_str) {
+                if let Some(name) = self.clusters.resolve_fuzzy(s) {
+                    found = Some(name);
+                    break;
+                }
+            }
+            if let Some(n) = p.get(&key).and_then(PhotonValue::as_object_id) {
+                if let Some(name) = self.clusters.resolve_number(n as i64) {
+                    found = Some(name);
+                    break;
+                }
+            }
+        }
+
+        if found.is_none() {
+            found = walk_strings(p).into_iter().find_map(|s| self.clusters.resolve_fuzzy(&s));
+        }
+
+        if found.is_none() {
+            found = p
+                .values()
+                .filter_map(PhotonValue::as_str)
+                .find(|s| looks_like_map(s))
+                .map(|s| s.to_string());
+        }
+
+        let map = found?;
+        if self.current_map.as_deref() == Some(map.as_str()) {
+            return None;
+        }
         self.current_map = Some(map.clone());
         Some(SessionEvent::Cluster(ClusterInfo {
             map,
@@ -390,6 +483,180 @@ impl SessionWorld {
                 )
             })
     }
+
+    fn resolve_player(&self, object_id: i32) -> Option<String> {
+        self.players_by_id.get(&object_id).map(|p| p.name.clone())
+    }
+
+    fn player_or_unknown(&self, object_id: i32) -> String {
+        self.resolve_player(object_id)
+            .unwrap_or_else(|| format!("id:{object_id}"))
+    }
+
+    fn try_combat_hit(&self, p: &BTreeMap<u8, PhotonValue>) -> Option<SessionEvent> {
+        // HealthUpdate (community tools): 0=target, 2=healthChange, 3=newHealth, 6=causer
+        let target_id = p.get(&0).and_then(PhotonValue::as_object_id)?;
+        let delta = p
+            .get(&2)
+            .and_then(PhotonValue::as_f64)
+            .or_else(|| p.get(&3).and_then(PhotonValue::as_f64))?;
+        let new_health = p.get(&3).and_then(PhotonValue::as_f64).unwrap_or(0.0);
+        if new_health != 0.0 && !(0.0..=500_000.0).contains(&new_health) {
+            return None;
+        }
+        let causer_id = p.get(&6).and_then(PhotonValue::as_object_id).or_else(|| {
+            // Some patches put the causer in 1, but only if 2 is a health-delta float.
+            if matches!(p.get(&2), Some(PhotonValue::Float(_))) {
+                p.get(&1).and_then(PhotonValue::as_object_id)
+            } else {
+                None
+            }
+        })?;
+        let target_known = self.players_by_id.contains_key(&target_id);
+        let causer_known = self.players_by_id.contains_key(&causer_id);
+        if !target_known && !causer_known {
+            return None;
+        }
+        let amount = delta.abs().round() as i64;
+        if amount < 1 || amount > 2_000_000 {
+            return None;
+        }
+        // Regen ticks without a known causer are noisy.
+        if !causer_known && amount < 25 {
+            return None;
+        }
+        if causer_id == target_id && delta < 0.0 {
+            return None;
+        }
+
+        let target = self.player_or_unknown(target_id);
+        let source = self.player_or_unknown(causer_id);
+
+        let hit = CombatHit {
+            id: Uuid::new_v4().to_string(),
+            timestamp: now_ms(),
+            source,
+            target,
+            amount,
+            map: self.current_map.clone(),
+        };
+        if delta > 0.5 {
+            Some(SessionEvent::Heal(hit))
+        } else if delta < -0.5 {
+            Some(SessionEvent::Damage(hit))
+        } else {
+            None
+        }
+    }
+
+    fn try_health(&mut self, p: &BTreeMap<u8, PhotonValue>) -> Option<SessionEvent> {
+        let id = p.get(&0).and_then(PhotonValue::as_object_id)?;
+        let name = self.resolve_player(id)?;
+        let health = p.get(&1).and_then(PhotonValue::as_f64)?;
+        if !(0.0..=400_000.0).contains(&health) {
+            return None;
+        }
+        let prev = self.last_health.insert(id, health.round() as i64);
+        let Some(prev) = prev else {
+            return None;
+        };
+        let delta = health.round() as i64 - prev;
+        if delta <= -25 {
+            Some(SessionEvent::Damage(CombatHit {
+                id: Uuid::new_v4().to_string(),
+                timestamp: now_ms(),
+                source: "desconocido".into(),
+                target: name,
+                amount: -delta,
+                map: self.current_map.clone(),
+            }))
+        } else if delta >= 25 && delta < 80_000 {
+            Some(SessionEvent::Heal(CombatHit {
+                id: Uuid::new_v4().to_string(),
+                timestamp: now_ms(),
+                source: name.clone(),
+                target: name,
+                amount: delta,
+                map: self.current_map.clone(),
+            }))
+        } else {
+            None
+        }
+    }
+
+    fn try_build(&self, p: &BTreeMap<u8, PhotonValue>) -> Option<SessionEvent> {
+        let player = p
+            .get(&1)
+            .and_then(PhotonValue::as_str)
+            .map(|s| s.to_string())
+            .or_else(|| {
+                p.get(&0)
+                    .and_then(PhotonValue::as_object_id)
+                    .and_then(|id| self.resolve_player(id))
+            })?;
+        if !looks_like_player_name(&player) {
+            return None;
+        }
+        let mut items = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+        let mut push_id = |id: i64, world: &SessionWorld, items: &mut Vec<GearPiece>| {
+            if id <= 50 || !seen.insert(id) {
+                return;
+            }
+            let (unique, name, enc) = world.resolve_item(id as i32);
+            if unique.starts_with("ITEM_") {
+                return;
+            }
+            items.push(GearPiece {
+                item_name: name,
+                item_unique_name: unique,
+                enchantment: enc,
+            });
+        };
+
+        for key in [33u8, 38, 39, 40, 41, 42] {
+            if let Some(PhotonValue::Array(arr)) = p.get(&key) {
+                for entry in arr {
+                    if let Some(id) = entry.as_i64() {
+                        push_id(id, self, &mut items);
+                    }
+                }
+            }
+        }
+        for value in p.values() {
+            if let PhotonValue::Array(arr) = value {
+                if arr.len() < 3 || arr.len() > 16 {
+                    continue;
+                }
+                let ids: Vec<i64> = arr.iter().filter_map(PhotonValue::as_i64).collect();
+                if ids.len() < 3 {
+                    continue;
+                }
+                for id in ids {
+                    push_id(id, self, &mut items);
+                }
+            }
+        }
+        for k in 7u8..=28 {
+            if let Some(id) = p.get(&k).and_then(PhotonValue::as_i64) {
+                push_id(id, self, &mut items);
+            }
+        }
+        items.truncate(12);
+        if items.len() < 3 {
+            return None;
+        }
+        let guild = self
+            .players_by_name
+            .get(&player)
+            .and_then(|pl| pl.guild.clone());
+        Some(SessionEvent::Build(BuildInfo {
+            player,
+            guild,
+            items,
+            timestamp: now_ms(),
+        }))
+    }
 }
 
 fn extract_item_list(p: &BTreeMap<u8, PhotonValue>) -> Vec<LostItem> {
@@ -419,6 +686,31 @@ fn extract_item_list(p: &BTreeMap<u8, PhotonValue>) -> Vec<LostItem> {
     }
     items.truncate(32);
     items
+}
+
+fn walk_strings(p: &BTreeMap<u8, PhotonValue>) -> Vec<String> {
+    let mut out = Vec::new();
+    for v in p.values() {
+        collect_strings(v, &mut out);
+    }
+    out
+}
+
+fn collect_strings(v: &PhotonValue, out: &mut Vec<String>) {
+    match v {
+        PhotonValue::String(s) if !s.is_empty() => out.push(s.clone()),
+        PhotonValue::Array(arr) => {
+            for x in arr {
+                collect_strings(x, out);
+            }
+        }
+        PhotonValue::Map(m) => {
+            for x in m.values() {
+                collect_strings(x, out);
+            }
+        }
+        _ => {}
+    }
 }
 
 fn looks_like_player_name(s: &str) -> bool {
@@ -472,8 +764,8 @@ fn looks_like_map(s: &str) -> bool {
     if MARKERS.iter().any(|m| lower.contains(m)) {
         return true;
     }
-    if t.contains('@') || (t.contains('-') && t.len() >= 5) {
-        return true;
+    if t.contains(' ') && t.chars().any(|c| c.is_alphabetic()) && t.len() >= 5 {
+        return !looks_like_player_name(t);
     }
     t.chars().all(|c| c.is_ascii_digit()) && t.len() >= 4
 }

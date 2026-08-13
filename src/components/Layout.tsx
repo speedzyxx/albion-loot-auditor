@@ -2,6 +2,7 @@ import {
   Activity,
   Boxes,
   FileSpreadsheet,
+  Flame,
   Radio,
   Search,
   Settings,
@@ -17,6 +18,7 @@ import { cn } from "../lib/format";
 
 const NAV: Array<{ id: ViewId; label: string; icon: typeof Radio }> = [
   { id: "live", label: "Captura live", icon: Radio },
+  { id: "combat", label: "Combate", icon: Flame },
   { id: "audit", label: "Auditoría cofre", icon: Boxes },
   { id: "deaths", label: "Muertes", icon: Skull },
   { id: "trades", label: "Trades", icon: Swords },
@@ -88,7 +90,7 @@ export function Layout({ children }: { children: ReactNode }) {
           </div>
           <div className="hidden min-w-[220px] items-center gap-2 rounded-lg border border-cyan-400/20 bg-cyan-400/10 px-3 py-2 text-xs text-cyan-200 md:flex">
             <Activity size={14} className="text-cyan-400" />
-            <span className="truncate font-medium">{map ?? "Sin cluster (entra a un mapa)"}</span>
+            <span className="truncate font-medium">{map ?? "Sin cluster — usa un portal o cambia de mapa"}</span>
           </div>
         </header>
         {updateInfo && (

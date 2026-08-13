@@ -1,10 +1,12 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { parseChestPaste } from "./lib/chestParser";
-import { demoChestText, demoDeaths, demoLoot, demoTrades } from "./lib/demo";
+import { demoBuilds, demoChestText, demoDamage, demoDeaths, demoHeals, demoLoot, demoTrades } from "./lib/demo";
 import type {
   AppSettings,
+  BuildInfo,
   CaptureStatus,
+  CombatHit,
   DeathEvent,
   LootEvent,
   NpcapStatus,
@@ -22,6 +24,9 @@ interface AppState {
   deaths: DeathEvent[];
   trades: TradeEvent[];
   storage: StorageLog[];
+  damage: CombatHit[];
+  heals: CombatHit[];
+  builds: Record<string, BuildInfo>;
   players: Record<string, PlayerInfo>;
   map: string | null;
   chestText: string;
@@ -38,6 +43,9 @@ interface AppState {
   addDeath: (event: DeathEvent) => void;
   addTrade: (event: TradeEvent) => void;
   addStorage: (event: StorageLog) => void;
+  addDamage: (event: CombatHit) => void;
+  addHeal: (event: CombatHit) => void;
+  upsertBuild: (build: BuildInfo) => void;
   upsertPlayer: (player: PlayerInfo) => void;
   setMap: (map: string) => void;
   setNpcap: (status: NpcapStatus) => void;
@@ -64,6 +72,9 @@ export const useAppStore = create<AppState>()(
       deaths: [],
       trades: [],
       storage: [],
+      damage: [],
+      heals: [],
+      builds: {},
       players: {},
       map: null,
       chestText: "",
@@ -84,11 +95,18 @@ export const useAppStore = create<AppState>()(
       addDeath: (event) => set((s) => ({ deaths: [event, ...s.deaths].slice(0, 2000) })),
       addTrade: (event) => set((s) => ({ trades: [event, ...s.trades].slice(0, 2000) })),
       addStorage: (event) => set((s) => ({ storage: [event, ...s.storage].slice(0, 2000) })),
+      addDamage: (event) => set((s) => ({ damage: [...s.damage, event].slice(-8000) })),
+      addHeal: (event) => set((s) => ({ heals: [...s.heals, event].slice(-8000) })),
+      upsertBuild: (build) => set((s) => ({ builds: { ...s.builds, [build.player]: build } })),
       upsertPlayer: (player) =>
         set((s) => ({ players: { ...s.players, [player.name]: player } })),
       setMap: (map) => set({ map }),
       setNpcap: (npcap) => set({ npcap }),
-      setCapture: (capture) => set({ capture }),
+      setCapture: (capture) =>
+        set((s) => ({
+          capture,
+          map: capture.map ?? s.map,
+        })),
       setSettings: (patch) => set((s) => ({ settings: { ...s.settings, ...patch } })),
       setUpdateInfo: (updateInfo) => set({ updateInfo }),
       loadDemo: () =>
@@ -96,6 +114,9 @@ export const useAppStore = create<AppState>()(
           loot: demoLoot(),
           deaths: demoDeaths(),
           trades: demoTrades(),
+          damage: demoDamage(),
+          heals: demoHeals(),
+          builds: demoBuilds(),
           chestText: demoChestText,
           parsedChest: parseChestPaste(demoChestText),
           map: "T8 Black Zone — Stagbourne",
@@ -106,6 +127,9 @@ export const useAppStore = create<AppState>()(
           deaths: [],
           trades: [],
           storage: [],
+          damage: [],
+          heals: [],
+          builds: {},
           players: {},
           map: null,
           parsedChest: null,

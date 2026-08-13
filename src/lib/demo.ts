@@ -1,4 +1,4 @@
-import type { DeathEvent, LootEvent, TradeEvent } from "../types";
+import type { BuildInfo, CombatHit, DeathEvent, LootEvent, TradeEvent } from "../types";
 
 export function demoLoot(): LootEvent[] {
   const now = Date.now();
@@ -96,4 +96,64 @@ function row(
     map,
     guild,
   };
+}
+
+export function demoDamage(): CombatHit[] {
+  const now = Date.now();
+  const map = "T8 Black Zone — Stagbourne";
+  return [
+    hit(now - 80000, "Hooz20", "FallenKnight", 18420, map),
+    hit(now - 79000, "Pichyluck", "NightWarden", 22100, map),
+    hit(now - 77000, "Hooz20", "NightWarden", 9600, map),
+    hit(now - 74000, "RivenXe", "FallenKnight", 31200, map),
+    hit(now - 70000, "MiraVoid", "NightWarden", 15400, map),
+    hit(now - 68000, "Pichyluck", "FallenKnight", 19800, map),
+  ];
+}
+
+export function demoHeals(): CombatHit[] {
+  const now = Date.now();
+  const map = "T8 Black Zone — Stagbourne";
+  return [
+    hit(now - 75000, "MiraVoid", "Hooz20", 8400, map),
+    hit(now - 72000, "MiraVoid", "Pichyluck", 12100, map),
+    hit(now - 69000, "MiraVoid", "RivenXe", 5600, map),
+  ];
+}
+
+export function demoBuilds(): Record<string, BuildInfo> {
+  const now = Date.now();
+  return {
+    Hooz20: {
+      player: "Hooz20",
+      guild: "Eroth",
+      timestamp: now,
+      items: [
+        piece("T8_2H_BOW", "Elder's Bow", 3),
+        piece("T8_ARMOR_LEATHER_SET3", "Elder's Jacket", 2),
+        piece("T8_HEAD_LEATHER_SET3", "Elder's Hood", 2),
+        piece("T8_SHOES_LEATHER_SET3", "Elder's Shoes", 1),
+        piece("T8_CAPEITEM_FW_LYMHURST", "Lymhurst Cape", 0),
+      ],
+    },
+    Pichyluck: {
+      player: "Pichyluck",
+      guild: "Eroth",
+      timestamp: now,
+      items: [
+        piece("T8_MAIN_CURSEDSTAFF", "Elder's Cursed Staff", 2),
+        piece("T8_ARMOR_CLOTH_SET3", "Elder's Robe", 2),
+        piece("T8_HEAD_CLOTH_SET3", "Elder's Cowl", 1),
+        piece("T8_SHOES_CLOTH_SET3", "Elder's Sandals", 1),
+      ],
+    },
+  };
+}
+
+function hit(timestamp: number, source: string, target: string, amount: number, map: string): CombatHit {
+  return { id: `${timestamp}-${source}-${target}`, timestamp, source, target, amount, map };
+}
+
+function piece(itemUniqueName: string, itemName: string, enchantment: number) {
+  return { itemUniqueName, itemName, enchantment };
 }

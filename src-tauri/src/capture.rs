@@ -113,6 +113,7 @@ pub struct CaptureEngine {
     live: Arc<AtomicBool>,
     devices: Arc<Mutex<Vec<String>>>,
     last_error: Arc<Mutex<Option<String>>>,
+    current_map: Arc<Mutex<Option<String>>>,
 }
 
 impl CaptureEngine {
@@ -124,6 +125,7 @@ impl CaptureEngine {
             live: Arc::new(AtomicBool::new(false)),
             devices: Arc::new(Mutex::new(Vec::new())),
             last_error: Arc::new(Mutex::new(None)),
+            current_map: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -136,6 +138,7 @@ impl CaptureEngine {
             decoded: self.decoded.load(Ordering::Relaxed),
             live: self.live.load(Ordering::Relaxed),
             error: self.last_error.lock().clone(),
+            map: self.current_map.lock().clone(),
         }
     }
 
@@ -164,6 +167,7 @@ impl CaptureEngine {
         let live = self.live.clone();
         let devices = self.devices.clone();
         let last_error = self.last_error.clone();
+        let current_map = self.current_map.clone();
 
         thread::spawn(move || {
             if let Err(err) = capture_loop(
@@ -174,6 +178,7 @@ impl CaptureEngine {
                 decoded,
                 live.clone(),
                 devices,
+                current_map,
             ) {
                 *last_error.lock() = Some(err);
             }
@@ -192,6 +197,7 @@ fn capture_loop(
     decoded: Arc<AtomicU64>,
     live: Arc<AtomicBool>,
     devices: Arc<Mutex<Vec<String>>>,
+    current_map: Arc<Mutex<Option<String>>>,
 ) -> Result<(), String> {
     let names = unsafe { list_devices(&api)? };
     *devices.lock() = names.clone();
@@ -247,9 +253,15 @@ fn capture_loop(
     let mut parser = PhotonParser::new();
     let mut world = SessionWorld::default();
     world.item_names = crate::items::load_catalog();
+    world.clusters = crate::world::ClusterBook::load();
+    world.current_map = current_map.lock().clone();
     let _ = app.emit(
         "capture-log",
-        format!("Catálogo de ítems: {} entradas", world.item_names.len()),
+        format!(
+            "Catálogo: {} ítems · {} clusters",
+            world.item_names.len(),
+            world.clusters.len()
+        ),
     );
     let mut last_packet = std::time::Instant::now();
 
@@ -281,6 +293,9 @@ fn capture_loop(
                     decoded.fetch_add(messages.len() as u64, Ordering::Relaxed);
                     let events = world.ingest(messages);
                     for event in events {
+                        if let SessionEvent::Cluster(info) = &event {
+                            *current_map.lock() = Some(info.map.clone());
+                        }
                         emit_event(&app, event);
                     }
                 }
@@ -321,6 +336,15 @@ fn emit_event(app: &AppHandle, event: SessionEvent) {
         }
         SessionEvent::Cluster(_) => {
             let _ = app.emit("cluster", &event);
+        }
+        SessionEvent::Damage(_) => {
+            let _ = app.emit("damage", &event);
+        }
+        SessionEvent::Heal(_) => {
+            let _ = app.emit("heal", &event);
+        }
+        SessionEvent::Build(_) => {
+            let _ = app.emit("build", &event);
         }
     }
     let _ = app.emit("session-event", &event);
