@@ -1,0 +1,1 @@
+export { TradesView } from "./DeathsView";

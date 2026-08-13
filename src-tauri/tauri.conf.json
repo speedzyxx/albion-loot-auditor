@@ -1,0 +1,62 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Albion Loot Auditor",
+  "version": "0.1.0",
+  "identifier": "com.albion.loot-auditor",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "Albion Loot Auditor & Analytics",
+        "width": 1440,
+        "height": 900,
+        "minWidth": 1100,
+        "minHeight": 720,
+        "resizable": true,
+        "decorations": true,
+        "center": true,
+        "backgroundColor": "#07090f"
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis"],
+    "createUpdaterArtifacts": true,
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.png",
+      "icons/icon.ico"
+    ],
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser",
+        "displayLanguageSelector": false
+      }
+    },
+    "category": "Utility",
+    "shortDescription": "Auditoría de loot ZvZ para Albion Online",
+    "longDescription": "Captura loot, muertes y trades de Albion Online, concilia el cofre del gremio y exporta reportes a Discord."
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDk5MzVDQkM0MTJGQUQyMDMKUldRRDB2b1N4TXMxbVYvTWJIT1R0N29zVFYxcTRYcy9neFJuVllSVVlLTGNhUlMrdkoyUXF0b1YK",
+      "endpoints": [
+        "https://github.com/PLACEHOLDER_OWNER/PLACEHOLDER_REPO/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
+  }
+}

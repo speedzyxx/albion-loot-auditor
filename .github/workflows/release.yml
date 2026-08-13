@@ -1,0 +1,83 @@
+name: Release
+
+# Compila el instalador de Windows y publica un GitHub Release con
+# latest.json para el auto-update de Tauri.
+#
+# Disparadores (todo en la nube, sin comandos locales):
+#   - Push de un tag v*          (ej. git tag v0.1.0 && git push --tags)
+#   - Push a la rama `release`
+#   - Botón "Run workflow" en la pestaña Actions (workflow_dispatch)
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - release
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  publish-windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          cache: npm
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: "./src-tauri -> target"
+
+      - name: Inject updater endpoint for this repository
+        shell: pwsh
+        run: |
+          $confPath = "src-tauri/tauri.conf.json"
+          $conf = Get-Content $confPath -Raw
+          $endpoint = "https://github.com/$env:GITHUB_REPOSITORY/releases/latest/download/latest.json"
+          $conf = $conf -replace "PLACEHOLDER_OWNER/PLACEHOLDER_REPO", $env:GITHUB_REPOSITORY
+          Set-Content -Path $confPath -Value $conf -NoNewline
+          Write-Host "Updater endpoint -> $endpoint"
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Verify updater signing secret
+        shell: pwsh
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:TAURI_SIGNING_PRIVATE_KEY)) {
+            Write-Host "::error::Falta el secret TAURI_SIGNING_PRIVATE_KEY. Genera las claves con 'npx tauri signer generate -w tauri-updater.key' y sube la clave privada a Settings > Secrets. Ver README.md."
+            exit 1
+          }
+
+      - name: Build Windows installer and publish release
+        uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          tagName: v__VERSION__
+          releaseName: "Albion Loot Auditor v__VERSION__"
+          releaseBody: |
+            Instalador de Windows generado automáticamente por GitHub Actions.
+
+            1. Descarga `Albion Loot Auditor_x.y.z_x64-setup.exe`
+            2. Instala Npcap (WinPcap compatible) si el auditor lo solicita al arrancar
+            3. Las actualizaciones siguientes se instalan solas al abrir la app
+          releaseDraft: false
+          prerelease: false
+          updaterJsonPreferNsis: true
+          args: --bundles nsis
