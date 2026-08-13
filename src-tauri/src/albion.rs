@@ -59,11 +59,6 @@ impl SessionWorld {
                     if let Some(ev) = self.handle_event(game_code, &parameters) {
                         out.push(ev);
                     }
-                    if let Some(ev) = self.try_cluster(&parameters) {
-                        if !matches!(out.last(), Some(SessionEvent::Cluster(_))) {
-                            out.push(ev);
-                        }
-                    }
                     if let Some(ev) = self.try_combat_hit(&parameters) {
                         out.push(ev);
                     } else if let Some(ev) = self.try_health(&parameters) {
@@ -84,11 +79,6 @@ impl SessionWorld {
                     if let Some(ev) = self.handle_operation(op, &parameters) {
                         out.push(ev);
                     }
-                    if let Some(ev) = self.try_cluster(&parameters) {
-                        if !matches!(out.last(), Some(SessionEvent::Cluster(_))) {
-                            out.push(ev);
-                        }
-                    }
                 }
                 PhotonMessage::Response {
                     operation_code,
@@ -101,11 +91,6 @@ impl SessionWorld {
                         .unwrap_or(operation_code as i64);
                     if let Some(ev) = self.handle_operation(op, &parameters) {
                         out.push(ev);
-                    }
-                    if let Some(ev) = self.try_cluster(&parameters) {
-                        if !matches!(out.last(), Some(SessionEvent::Cluster(_))) {
-                            out.push(ev);
-                        }
                     }
                 }
             }
@@ -122,9 +107,6 @@ impl SessionWorld {
             return Some(ev);
         }
         if let Some(ev) = self.try_character(p) {
-            return Some(ev);
-        }
-        if let Some(ev) = self.try_cluster(p) {
             return Some(ev);
         }
         if let Some(ev) = self.try_death(code, p) {
@@ -144,10 +126,10 @@ impl SessionWorld {
 
     fn handle_operation(
         &mut self,
-        _op: i64,
+        op: i64,
         p: &BTreeMap<u8, PhotonValue>,
     ) -> Option<SessionEvent> {
-        if let Some(ev) = self.try_cluster(p) {
+        if let Some(ev) = self.try_cluster(p, Some(op)) {
             return Some(ev);
         }
         if let Some(ev) = self.try_join_self(p) {
@@ -315,32 +297,29 @@ impl SessionWorld {
         Some(SessionEvent::Player(info))
     }
 
-    fn try_cluster(&mut self, p: &BTreeMap<u8, PhotonValue>) -> Option<SessionEvent> {
-        let mut found: Option<String> = None;
+    fn try_cluster(&mut self, p: &BTreeMap<u8, PhotonValue>, op: Option<i64>) -> Option<SessionEvent> {
+        // Game events (param 252) carry object ids, not the cluster. Join is
+        // op 2 with mapId at 8; ChangeCluster is op 41/35 with index at 0.
+        if p.contains_key(&252) {
+            return None;
+        }
+        let op = op.or_else(|| p.get(&253).and_then(PhotonValue::as_i64));
 
-        // Join puts mapId in 8; ChangeCluster puts it in 0. Prefer those keys.
-        for key in [0u8, 8, 1, 2, 255] {
-            if let Some(name) = self.cluster_from_value(p.get(&key)) {
-                found = Some(name);
-                break;
+        let mut found = self.cluster_from_value(p.get(&8));
+        if found.is_none() && matches!(op, Some(2) | Some(35) | Some(41)) {
+            found = self.cluster_from_value(p.get(&0));
+        }
+        if found.is_none() {
+            if let Some(s) = p.get(&0).and_then(PhotonValue::as_str) {
+                found = self.clusters.resolve_fuzzy(s);
             }
         }
-
         if found.is_none() {
-            for value in p.values() {
-                if let Some(name) = self.cluster_from_value(Some(value)) {
-                    found = Some(name);
-                    break;
-                }
-            }
-        }
-
-        if found.is_none() {
-            found = walk_strings(p)
-                .into_iter()
-                .find_map(|s| self.clusters.resolve_fuzzy(&s).or_else(|| {
+            found = walk_strings(p).into_iter().find_map(|s| {
+                self.clusters.resolve_fuzzy(&s).or_else(|| {
                     looks_like_map(&s).then_some(s)
-                }));
+                })
+            });
         }
 
         let map = found?;
@@ -359,8 +338,8 @@ impl SessionWorld {
         if let Some(s) = value.as_str() {
             return self.clusters.resolve_fuzzy(s);
         }
-        if let Some(n) = value.as_object_id() {
-            return self.clusters.resolve_number(n as i64);
+        if let Some(n) = value.as_i64() {
+            return self.clusters.resolve_number(n);
         }
         if let PhotonValue::Array(arr) = value {
             for entry in arr {

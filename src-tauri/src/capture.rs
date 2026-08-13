@@ -404,9 +404,14 @@ fn ipv4_udp_payload(ip: &[u8]) -> Option<&[u8]> {
     if !matches!(sport, 5055 | 5056 | 5058 | 4535) && !matches!(dport, 5055 | 5056 | 5058 | 4535) {
         return None;
     }
-    let len = u16::from_be_bytes([udp[4], udp[5]]) as usize;
-    let payload_end = len.max(8);
-    udp.get(8..payload_end.min(udp.len()))
+    let declared = u16::from_be_bytes([udp[4], udp[5]]) as usize;
+    // Windows TSO/checksum offload often writes UDP length 0 or a truncated
+    // value. Prefer the declared length only when it fits the capture.
+    if declared > 8 && declared <= udp.len() {
+        udp.get(8..declared)
+    } else {
+        udp.get(8..)
+    }
 }
 
 unsafe fn list_devices(api: &PcapApi) -> Result<Vec<String>, String> {
