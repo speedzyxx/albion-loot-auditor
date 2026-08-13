@@ -25,6 +25,7 @@ export interface CaptureStatus {
   live: boolean;
   error?: string | null;
   map?: string | null;
+  clusters?: number;
 }
 
 export interface LootEvent {

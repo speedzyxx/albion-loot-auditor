@@ -73,6 +73,7 @@ export function Layout({ children }: { children: ReactNode }) {
           </div>
           <div className="mt-1 font-mono text-[11px] text-slate-600">
             {capture?.packets ?? 0} pkts · {capture?.decoded ?? 0} ev
+            {typeof capture?.clusters === "number" && capture.clusters > 0 ? ` · ${capture.clusters} mapas` : ""}
           </div>
         </div>
       </aside>
@@ -90,7 +91,9 @@ export function Layout({ children }: { children: ReactNode }) {
           </div>
           <div className="hidden min-w-[220px] items-center gap-2 rounded-lg border border-cyan-400/20 bg-cyan-400/10 px-3 py-2 text-xs text-cyan-200 md:flex">
             <Activity size={14} className="text-cyan-400" />
-            <span className="truncate font-medium">{map ?? "Sin cluster — usa un portal o cambia de mapa"}</span>
+            <span className="truncate font-medium">
+              {map ?? "Sin cluster — cruza un portal o relogea (Join)"}
+            </span>
           </div>
         </header>
         {updateInfo && (

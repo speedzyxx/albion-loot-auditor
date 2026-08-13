@@ -1,11 +1,12 @@
 //! Cluster index → display name from ao-bin-dumps `world.json`.
-//! Albion often sends `1000` / `"1000"` on the wire, not `"Lymhurst"`.
+//! Albion sends `1311` on the wire, not `"Watchwood Precipice"`.
 
 use serde::Deserialize;
 use std::collections::HashMap;
 
 const WORLD_URL: &str =
     "https://raw.githubusercontent.com/ao-data/ao-bin-dumps/master/formatted/world.json";
+const EMBEDDED_WORLD: &str = include_str!("../data/world.json");
 
 #[derive(Debug, Deserialize)]
 struct ClusterRow {
@@ -23,17 +24,26 @@ pub struct ClusterBook {
 
 impl ClusterBook {
     pub fn load() -> Self {
-        let mut book = Self::with_city_fallbacks();
-        let Ok(client) = reqwest::blocking::Client::builder()
-            .timeout(std::time::Duration::from_secs(20))
+        let mut book = Self::from_json(EMBEDDED_WORLD);
+        if let Ok(client) = reqwest::blocking::Client::builder()
+            .timeout(std::time::Duration::from_secs(12))
             .build()
-        else {
-            return book;
-        };
-        let Ok(resp) = client.get(WORLD_URL).send() else {
-            return book;
-        };
-        let Ok(rows) = resp.json::<Vec<ClusterRow>>() else {
+        {
+            if let Ok(resp) = client.get(WORLD_URL).send() {
+                if let Ok(text) = resp.text() {
+                    let fresh = Self::from_json(&text);
+                    if fresh.len() >= book.len() {
+                        book = fresh;
+                    }
+                }
+            }
+        }
+        book
+    }
+
+    fn from_json(text: &str) -> Self {
+        let mut book = Self::with_city_fallbacks();
+        let Ok(rows) = serde_json::from_str::<Vec<ClusterRow>>(text) else {
             return book;
         };
         for row in rows {
@@ -66,6 +76,7 @@ impl ClusterBook {
             ("3003", "Caerleon"),
             ("5000", "Brecilien"),
             ("5001", "Brecilien"),
+            ("1311", "Watchwood Precipice"),
         ];
         for (idx, name) in CITIES {
             book.insert(idx, name);
@@ -85,9 +96,21 @@ impl ClusterBook {
 
     pub fn resolve(&self, raw: &str) -> Option<String> {
         let t = raw.trim();
-        if t.is_empty() || t.len() > 80 {
+        if t.is_empty() || t.len() > 120 {
             return None;
         }
+        if t.contains('@') {
+            for part in t.split('@').filter(|p| !p.is_empty()) {
+                if let Some(name) = self.resolve_one(part) {
+                    return Some(name);
+                }
+            }
+            return None;
+        }
+        self.resolve_one(t)
+    }
+
+    fn resolve_one(&self, t: &str) -> Option<String> {
         let key = t.to_ascii_lowercase();
         if let Some(name) = self.by_key.get(&key) {
             return Some(name.clone());
@@ -99,7 +122,7 @@ impl ClusterBook {
     }
 
     pub fn resolve_number(&self, n: i64) -> Option<String> {
-        if n < 0 {
+        if n <= 0 {
             return None;
         }
         let plain = n.to_string();
@@ -115,7 +138,6 @@ impl ClusterBook {
         None
     }
 
-    /// Cities often appear as "Lymhurst Market" / "Bank of Lymhurst" in other packets.
     pub fn resolve_fuzzy(&self, raw: &str) -> Option<String> {
         if let Some(exact) = self.resolve(raw) {
             return Some(exact);
@@ -129,22 +151,21 @@ impl ClusterBook {
             "fort sterling",
             "caerleon",
             "brecilien",
+            "watchwood",
         ];
         for city in CITIES {
-            if lower == *city || lower.starts_with(&format!("{city} ")) || lower.contains(&format!(" {city}")) {
-                return self.by_key.get(*city).cloned().or_else(|| {
-                    Some(city.split(' ').map(title_case).collect::<Vec<_>>().join(" "))
-                });
+            if lower == *city
+                || lower.starts_with(&format!("{city} "))
+                || lower.contains(&format!(" {city}"))
+            {
+                if let Some(name) = self.by_key.get(*city) {
+                    return Some(name.clone());
+                }
+                if *city == "watchwood" {
+                    return Some("Watchwood Precipice".into());
+                }
             }
         }
         None
-    }
-}
-
-fn title_case(s: &str) -> String {
-    let mut c = s.chars();
-    match c.next() {
-        Some(f) => format!("{}{}", f.to_uppercase(), c.as_str()),
-        None => String::new(),
     }
 }

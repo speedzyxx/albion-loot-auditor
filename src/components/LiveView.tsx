@@ -41,9 +41,15 @@ export function LiveView() {
         <div>
           <h1 className="font-display text-3xl font-bold">Combat loot</h1>
           <p className="text-sm text-slate-500">
-            Mapa: <span className="text-cyan-300">{map ?? "esperando cluster (portal o cambio de mapa)"}</span>
+            Mapa: <span className="text-cyan-300">{map ?? "esperando Join / ChangeCluster"}</span>
             {" · "}
             Solo cuenta loot de cadáveres en el mundo, no el banco de ciudad.
+            {!map && (
+              <span className="block text-amber-400/90">
+                Si ya estás dentro del mapa, el id no se reenvía. Entra a un portal y vuelve (o relog) con la captura
+                encendida. Watchwood Precipice es el cluster 1311.
+              </span>
+            )}
           </p>
         </div>
         <div className="flex gap-2">

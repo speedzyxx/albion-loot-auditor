@@ -20,6 +20,7 @@ pub struct CaptureStatus {
     pub live: bool,
     pub error: Option<String>,
     pub map: Option<String>,
+    pub clusters: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

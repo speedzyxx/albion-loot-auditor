@@ -114,6 +114,7 @@ pub struct CaptureEngine {
     devices: Arc<Mutex<Vec<String>>>,
     last_error: Arc<Mutex<Option<String>>>,
     current_map: Arc<Mutex<Option<String>>>,
+    clusters: Arc<Mutex<u32>>,
 }
 
 impl CaptureEngine {
@@ -126,6 +127,7 @@ impl CaptureEngine {
             devices: Arc::new(Mutex::new(Vec::new())),
             last_error: Arc::new(Mutex::new(None)),
             current_map: Arc::new(Mutex::new(None)),
+            clusters: Arc::new(Mutex::new(0)),
         }
     }
 
@@ -139,6 +141,7 @@ impl CaptureEngine {
             live: self.live.load(Ordering::Relaxed),
             error: self.last_error.lock().clone(),
             map: self.current_map.lock().clone(),
+            clusters: *self.clusters.lock(),
         }
     }
 
@@ -168,6 +171,7 @@ impl CaptureEngine {
         let devices = self.devices.clone();
         let last_error = self.last_error.clone();
         let current_map = self.current_map.clone();
+        let clusters = self.clusters.clone();
 
         thread::spawn(move || {
             if let Err(err) = capture_loop(
@@ -179,6 +183,7 @@ impl CaptureEngine {
                 live.clone(),
                 devices,
                 current_map,
+                clusters,
             ) {
                 *last_error.lock() = Some(err);
             }
@@ -198,6 +203,7 @@ fn capture_loop(
     live: Arc<AtomicBool>,
     devices: Arc<Mutex<Vec<String>>>,
     current_map: Arc<Mutex<Option<String>>>,
+    clusters: Arc<Mutex<u32>>,
 ) -> Result<(), String> {
     let names = unsafe { list_devices(&api)? };
     *devices.lock() = names.clone();
@@ -255,6 +261,7 @@ fn capture_loop(
     world.item_names = crate::items::load_catalog();
     world.clusters = crate::world::ClusterBook::load();
     world.current_map = current_map.lock().clone();
+    *clusters.lock() = world.clusters.len() as u32;
     let _ = app.emit(
         "capture-log",
         format!(

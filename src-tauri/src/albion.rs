@@ -318,15 +318,17 @@ impl SessionWorld {
     fn try_cluster(&mut self, p: &BTreeMap<u8, PhotonValue>) -> Option<SessionEvent> {
         let mut found: Option<String> = None;
 
-        for key in [0u8, 1, 2, 8, 255] {
-            if let Some(s) = p.get(&key).and_then(PhotonValue::as_str) {
-                if let Some(name) = self.clusters.resolve_fuzzy(s) {
-                    found = Some(name);
-                    break;
-                }
+        // Join puts mapId in 8; ChangeCluster puts it in 0. Prefer those keys.
+        for key in [0u8, 8, 1, 2, 255] {
+            if let Some(name) = self.cluster_from_value(p.get(&key)) {
+                found = Some(name);
+                break;
             }
-            if let Some(n) = p.get(&key).and_then(PhotonValue::as_object_id) {
-                if let Some(name) = self.clusters.resolve_number(n as i64) {
+        }
+
+        if found.is_none() {
+            for value in p.values() {
+                if let Some(name) = self.cluster_from_value(Some(value)) {
                     found = Some(name);
                     break;
                 }
@@ -334,15 +336,11 @@ impl SessionWorld {
         }
 
         if found.is_none() {
-            found = walk_strings(p).into_iter().find_map(|s| self.clusters.resolve_fuzzy(&s));
-        }
-
-        if found.is_none() {
-            found = p
-                .values()
-                .filter_map(PhotonValue::as_str)
-                .find(|s| looks_like_map(s))
-                .map(|s| s.to_string());
+            found = walk_strings(p)
+                .into_iter()
+                .find_map(|s| self.clusters.resolve_fuzzy(&s).or_else(|| {
+                    looks_like_map(&s).then_some(s)
+                }));
         }
 
         let map = found?;
@@ -354,6 +352,24 @@ impl SessionWorld {
             map,
             timestamp: now_ms(),
         }))
+    }
+
+    fn cluster_from_value(&self, value: Option<&PhotonValue>) -> Option<String> {
+        let value = value?;
+        if let Some(s) = value.as_str() {
+            return self.clusters.resolve_fuzzy(s);
+        }
+        if let Some(n) = value.as_object_id() {
+            return self.clusters.resolve_number(n as i64);
+        }
+        if let PhotonValue::Array(arr) = value {
+            for entry in arr {
+                if let Some(name) = self.cluster_from_value(Some(entry)) {
+                    return Some(name);
+                }
+            }
+        }
+        None
     }
 
     fn try_death(&self, code: i64, p: &BTreeMap<u8, PhotonValue>) -> Option<SessionEvent> {

@@ -607,8 +607,7 @@ fn read_param_p18(ty: u8, r: &mut Reader<'_>) -> Result<PhotonValue, ()> {
     match ty {
         0 | 8 => Ok(PhotonValue::Null),
         2 => Ok(PhotonValue::Bool(false)),
-        1 | 27 => Ok(PhotonValue::Bool(true)),
-        26 => Ok(PhotonValue::Bool(false)),
+        1 => Ok(PhotonValue::Bool(true)),
         3 => Ok(PhotonValue::Number(r.u8()? as i64)),
         4 => Ok(PhotonValue::Number(r.i16()? as i64)),
         5 => Ok(PhotonValue::Float(r.f32()? as f64)),
@@ -629,14 +628,43 @@ fn read_param_p18(ty: u8, r: &mut Reader<'_>) -> Result<PhotonValue, ()> {
         12 => Ok(PhotonValue::Number(-(r.u8()? as i64))),
         13 => Ok(PhotonValue::Number(r.u16()? as i64)),
         14 => Ok(PhotonValue::Number(-(r.u16()? as i64))),
-        28 | 29 | 30 | 31 | 32 | 33 => Ok(PhotonValue::Number(0)),
-        67 => {
+        15 => Ok(PhotonValue::Number(r.u8()? as i64)),
+        16 => Ok(PhotonValue::Number(-(r.u8()? as i64))),
+        17 => Ok(PhotonValue::Number(r.u16()? as i64)),
+        18 => Ok(PhotonValue::Number(-(r.u16()? as i64))),
+        19 => {
+            let _custom = r.u8()?;
             let len = read_compressed_int(r)? as usize;
             if len > 1_000_000 {
                 return Err(());
             }
             let bytes = r.bytes(len)?;
             Ok(PhotonValue::Bytes(bytes.to_vec()))
+        }
+        20 => {
+            let key_t = r.u8()?;
+            let val_t = r.u8()?;
+            let count = read_compressed_int(r)?;
+            if count < 0 || count > 4096 {
+                return Err(());
+            }
+            let mut map = BTreeMap::new();
+            for _ in 0..count {
+                let k = if key_t == 0 || key_t == 8 {
+                    let kt = r.u8()?;
+                    read_param_p18(kt, r)?
+                } else {
+                    read_param_p18(key_t, r)?
+                };
+                let v = if val_t == 0 || val_t == 8 {
+                    let vt = r.u8()?;
+                    read_param_p18(vt, r)?
+                } else {
+                    read_param_p18(val_t, r)?
+                };
+                map.insert(value_key(&k), v);
+            }
+            Ok(PhotonValue::Map(map))
         }
         21 => {
             let count = read_compressed_int(r)?;
@@ -659,9 +687,29 @@ fn read_param_p18(ty: u8, r: &mut Reader<'_>) -> Result<PhotonValue, ()> {
             }
             Ok(PhotonValue::Array(arr))
         }
-        _ => {
-            // Best-effort skip: unknown Protocol18 types abort this value.
-            Err(())
+        27 => Ok(PhotonValue::Bool(false)),
+        28 => Ok(PhotonValue::Bool(true)),
+        29 | 30 | 31 | 32 | 33 | 34 => Ok(PhotonValue::Number(0)),
+        67 => {
+            let len = read_compressed_int(r)? as usize;
+            if len > 1_000_000 {
+                return Err(());
+            }
+            let bytes = r.bytes(len)?;
+            Ok(PhotonValue::Bytes(bytes.to_vec()))
         }
+        ty if ty >= 64 => {
+            let elem_t = ty & 0x3f;
+            let len = read_compressed_int(r)? as usize;
+            if len > 50_000 {
+                return Err(());
+            }
+            let mut arr = Vec::with_capacity(len.min(1024));
+            for _ in 0..len {
+                arr.push(read_param_p18(elem_t, r)?);
+            }
+            Ok(PhotonValue::Array(arr))
+        }
+        _ => Err(()),
     }
 }
