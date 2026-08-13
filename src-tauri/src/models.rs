@@ -104,6 +104,7 @@ pub struct PlayerInfo {
 #[serde(rename_all = "camelCase")]
 pub struct ClusterInfo {
     pub map: String,
+    pub cluster_id: Option<String>,
     pub timestamp: i64,
 }
 

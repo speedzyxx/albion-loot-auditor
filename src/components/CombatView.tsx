@@ -190,7 +190,7 @@ function BuildCard({ build }: { build: BuildInfo }) {
       <div className="flex flex-wrap gap-1">
         {build.items.map((it, i) => (
           <div key={`${it.itemUniqueName}-${i}`} title={it.itemName}>
-            <ItemIcon uniqueName={it.itemUniqueName} enchantment={it.enchantment} size={36} />
+            <ItemIcon uniqueName={it.itemUniqueName} enchantment={it.enchantment} size={36} label={it.itemName} />
           </div>
         ))}
       </div>

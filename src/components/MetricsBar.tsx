@@ -23,11 +23,17 @@ export function MetricsBar() {
   const lootSilver = loot.reduce((s, e) => s + e.estimatedSilver, 0);
   const cards = [
     { label: "Silver loteado", value: formatSilver(lootSilver), sub: `${loot.length} eventos` },
-    { label: "Silver en cofre", value: formatSilver(audit.chestSilver), sub: "inventario pegado" },
+    {
+      label: "Silver en cofre",
+      value: audit.chestReady ? formatSilver(audit.chestSilver) : "—",
+      sub: audit.chestReady ? "inventario pegado" : "pega el cofre",
+    },
     {
       label: "Cumplimiento gremio",
-      value: `${audit.compliance}%`,
-      sub: `${audit.players.filter((p) => p.status === "pending").length} pendientes`,
+      value: audit.chestReady ? `${audit.compliance}%` : "—",
+      sub: audit.chestReady
+        ? `${audit.players.filter((p) => p.status === "pending").length} pendientes`
+        : "esperando cofre",
     },
   ];
 

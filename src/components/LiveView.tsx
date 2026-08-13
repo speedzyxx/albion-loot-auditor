@@ -43,11 +43,10 @@ export function LiveView() {
           <p className="text-sm text-slate-500">
             Mapa: <span className="text-cyan-300">{map ?? "esperando Join / ChangeCluster"}</span>
             {" · "}
-            Solo cuenta loot de cadáveres en el mundo, no el banco de ciudad.
+            Solo loot de cadáveres. El banco no cuenta. Pega el cofre en Auditoría para ver qué falta.
             {!map && (
               <span className="block text-amber-400/90">
-                Si ya estás dentro del mapa, el id no se reenvía. Entra a un portal y vuelve (o relog) con la captura
-                encendida. Watchwood Precipice es el cluster 1311.
+                Si ya estás en el mapa, cruza un portal o relogea con la captura encendida. Lymhurst Portal es 1301.
               </span>
             )}
           </p>
@@ -113,7 +112,7 @@ export function LiveView() {
                 <td className="px-4 py-2 text-slate-300">{e.lootedFrom || "—"}</td>
                 <td className="px-4 py-2">
                   <div className="flex items-center gap-3">
-                    <ItemIcon uniqueName={e.itemUniqueName} enchantment={e.enchantment} />
+                    <ItemIcon uniqueName={e.itemUniqueName} enchantment={e.enchantment} label={e.itemName} />
                     <div>
                       <div>
                         {e.isSilver

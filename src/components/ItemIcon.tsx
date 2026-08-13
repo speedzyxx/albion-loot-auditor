@@ -1,45 +1,56 @@
-export function itemIconUrl(uniqueName: string, enchantment = 0): string | null {
-  if (!uniqueName || uniqueName === "SILVER") {
-    return "https://render.albiononline.com/v1/item/T1_SILVERBARS.png";
+import { useEffect, useState } from "react";
+
+export function itemIconCandidates(uniqueName: string, enchantment = 0): string[] {
+  if (!uniqueName || uniqueName.startsWith("ITEM_")) {
+    return [];
   }
-  if (uniqueName.startsWith("ITEM_")) {
-    return null;
+  if (uniqueName === "SILVER") {
+    return ["https://render.albiononline.com/v1/item/T1_SILVERBARS.png"];
   }
   const base = uniqueName.replace(/@\d+$/, "");
-  const id = enchantment > 0 ? `${base}@${enchantment}` : uniqueName.includes("@") ? uniqueName : base;
-  return `https://render.albiononline.com/v1/item/${encodeURIComponent(id)}.png`;
+  const enc = enchantment > 0 ? enchantment : Number((uniqueName.match(/@(\d+)$/) || [])[1] || 0);
+  const ids = enc > 0 ? [`${base}@${enc}`, base] : [base];
+  return [...new Set(ids)].map((id) => `https://render.albiononline.com/v1/item/${encodeURIComponent(id)}.png`);
 }
 
 export function ItemIcon({
   uniqueName,
   enchantment = 0,
   size = 40,
+  label,
 }: {
   uniqueName: string;
   enchantment?: number;
   size?: number;
+  label?: string;
 }) {
-  const src = itemIconUrl(uniqueName, enchantment);
-  if (!src) {
+  const urls = itemIconCandidates(uniqueName, enchantment);
+  const [idx, setIdx] = useState(0);
+  useEffect(() => {
+    setIdx(0);
+  }, [uniqueName, enchantment]);
+  const src = urls[idx];
+
+  if (!src || idx >= urls.length) {
     return (
       <div
-        className="flex shrink-0 items-center justify-center rounded bg-ink-900 text-[10px] text-slate-500"
+        className="flex shrink-0 items-center justify-center rounded bg-ink-900 text-[9px] font-semibold uppercase text-slate-500"
         style={{ width: size, height: size }}
+        title={label || uniqueName}
       >
-        ?
+        {(label || uniqueName || "?").slice(0, 3)}
       </div>
     );
   }
+
   return (
     <img
       src={src}
-      alt=""
+      alt={label || ""}
       width={size}
       height={size}
       className="shrink-0 rounded bg-ink-900 object-contain"
-      onError={(e) => {
-        e.currentTarget.style.visibility = "hidden";
-      }}
+      onError={() => setIdx((i) => i + 1)}
     />
   );
 }

@@ -6,7 +6,7 @@ import type {
   PlayerReconciliation,
   TradeEvent,
 } from "../types";
-import { itemKey } from "./format";
+import { itemKeys } from "./format";
 
 function asDelta(
   name: string,
@@ -15,7 +15,7 @@ function asDelta(
   enchantment: number,
   silverEach: number,
 ): ItemDelta {
-  const key = itemKey(uniqueName, name, enchantment);
+  const key = itemKeys(uniqueName, name, enchantment)[0] ?? `${name}@${enchantment || 0}`;
   return {
     key,
     name,
@@ -41,6 +41,42 @@ function sumSilver(items: ItemDelta[]): number {
   return items.reduce((s, i) => s + i.estimatedSilver, 0);
 }
 
+function indexChest(items: ChestItem[]): Map<string, ItemDelta> {
+  const pool = new Map<string, ItemDelta>();
+  for (const item of items) {
+    const delta = asDelta(
+      item.name,
+      item.uniqueName,
+      item.quantity,
+      item.enchantment,
+      unitSilver(item.estimatedSilver, item.quantity),
+    );
+    const keys = itemKeys(item.uniqueName, item.name, item.enchantment);
+    const existing = keys.map((k) => pool.get(k)).find(Boolean);
+    if (existing) {
+      existing.quantity += delta.quantity;
+      existing.estimatedSilver += delta.estimatedSilver;
+      for (const k of keys) pool.set(k, existing);
+    } else {
+      for (const k of keys) pool.set(k, delta);
+    }
+  }
+  return pool;
+}
+
+function takeFromChest(pool: Map<string, ItemDelta>, item: ItemDelta): number {
+  for (const k of itemKeys(item.uniqueName, item.name, item.enchantment)) {
+    const inChest = pool.get(k);
+    if (!inChest || inChest.quantity <= 0) continue;
+    const take = Math.min(item.quantity, inChest.quantity);
+    inChest.quantity -= take;
+    const unit = item.quantity ? item.estimatedSilver / item.quantity : 0;
+    inChest.estimatedSilver -= Math.round(unit * take);
+    return take;
+  }
+  return 0;
+}
+
 export function reconcile(opts: {
   loot: LootEvent[];
   trades: TradeEvent[];
@@ -48,6 +84,7 @@ export function reconcile(opts: {
   officers: string[];
 }): AuditResult {
   const officers = new Set(opts.officers.map((o) => o.trim().toLowerCase()).filter(Boolean));
+  const chestReady = opts.chest.length > 0;
   const lootByPlayer = new Map<string, Map<string, ItemDelta>>();
   const playerGuild = new Map<string, string | null | undefined>();
 
@@ -79,11 +116,8 @@ export function reconcile(opts: {
     );
   }
 
-  const chestPool = new Map<string, ItemDelta>();
-  for (const item of opts.chest) {
-    merge(chestPool, asDelta(item.name, item.uniqueName, item.quantity, item.enchantment, unitSilver(item.estimatedSilver, item.quantity)));
-  }
-  const chestSilver = sumSilver([...chestPool.values()]);
+  const chestPool = indexChest(opts.chest);
+  const chestSilver = sumSilver([...new Set(chestPool.values())]);
 
   const players: PlayerReconciliation[] = [];
 
@@ -96,30 +130,26 @@ export function reconcile(opts: {
     const deposited: ItemDelta[] = [];
     const pending: ItemDelta[] = [];
 
-    for (const item of expected.values()) {
-      if (item.quantity <= 0) continue;
-      const inChest = chestPool.get(item.key);
-      if (!inChest || inChest.quantity <= 0) {
-        pending.push({ ...item });
-        continue;
-      }
-      const take = Math.min(item.quantity, inChest.quantity);
-      const unit = item.quantity ? item.estimatedSilver / item.quantity : 0;
-      deposited.push({
-        ...item,
-        quantity: take,
-        estimatedSilver: Math.round(unit * take),
-      });
-      inChest.quantity -= take;
-      inChest.estimatedSilver -= Math.round(unit * take);
-      if (inChest.quantity <= 0) chestPool.delete(item.key);
-      const leftover = item.quantity - take;
-      if (leftover > 0) {
-        pending.push({
-          ...item,
-          quantity: leftover,
-          estimatedSilver: Math.round(unit * leftover),
-        });
+    if (chestReady) {
+      for (const item of expected.values()) {
+        if (item.quantity <= 0) continue;
+        const take = takeFromChest(chestPool, item);
+        const unit = item.quantity ? item.estimatedSilver / item.quantity : 0;
+        if (take > 0) {
+          deposited.push({
+            ...item,
+            quantity: take,
+            estimatedSilver: Math.round(unit * take),
+          });
+        }
+        const leftover = item.quantity - take;
+        if (leftover > 0) {
+          pending.push({
+            ...item,
+            quantity: leftover,
+            estimatedSilver: Math.round(unit * leftover),
+          });
+        }
       }
     }
 
@@ -128,10 +158,12 @@ export function reconcile(opts: {
     const depositedSilver = sumSilver(deposited);
     const lootedSilver = sumSilver(looted);
 
-    let status: PlayerReconciliation["status"] = "complete";
-    if (pending.length > 0) status = "pending";
-    else if (xfer.length > 0 && deposited.length === 0) status = "transferred";
-    else if (xfer.length > 0) status = "transferred";
+    let status: PlayerReconciliation["status"] = "waiting";
+    if (chestReady) {
+      if (pending.length > 0) status = "pending";
+      else if (xfer.length > 0) status = "transferred";
+      else status = "complete";
+    }
 
     players.push({
       player,
@@ -149,21 +181,28 @@ export function reconcile(opts: {
   }
 
   players.sort((a, b) => {
-    const rank = { pending: 0, transferred: 1, complete: 2 };
+    const rank = { pending: 0, waiting: 1, transferred: 2, complete: 3 };
     return rank[a.status] - rank[b.status] || b.lootedSilver - a.lootedSilver;
   });
 
   const lootSilver = players.reduce((s, p) => s + p.lootedSilver, 0);
   const accounted = players.reduce((s, p) => s + p.depositedSilver + p.transferredSilver, 0);
-  const compliance = lootSilver > 0 ? Math.round((accounted / lootSilver) * 100) : 100;
+  const compliance = !chestReady
+    ? 0
+    : lootSilver > 0
+      ? Math.round((accounted / lootSilver) * 100)
+      : 100;
+
+  const leftover = [...new Set(chestPool.values())].filter((i) => i.quantity > 0);
 
   return {
     players,
     chestSilver,
     lootSilver,
     compliance: Math.min(100, Math.max(0, compliance)),
+    chestReady,
     extras: [],
-    unmatchedChest: [...chestPool.values()].filter((i) => i.quantity > 0),
+    unmatchedChest: leftover,
   };
 }
 

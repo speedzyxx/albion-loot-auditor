@@ -7,7 +7,7 @@ export type ViewId =
   | "reports"
   | "settings";
 
-export type PlayerStatus = "complete" | "transferred" | "pending";
+export type PlayerStatus = "complete" | "transferred" | "pending" | "waiting";
 
 export interface NpcapStatus {
   installed: boolean;
@@ -166,6 +166,7 @@ export interface AuditResult {
   chestSilver: number;
   lootSilver: number;
   compliance: number;
+  chestReady: boolean;
   extras: ItemDelta[];
   unmatchedChest: ItemDelta[];
 }

@@ -3,17 +3,19 @@ import { useAppStore } from "../store";
 import { parseChestPaste } from "../lib/chestParser";
 import { reconcile } from "../lib/audit";
 import { displayItem, formatSilver, cn } from "../lib/format";
+import { ItemIcon } from "./ItemIcon";
+import type { ItemDelta } from "../types";
 
 const STATUS = {
-  complete: { label: "COMPLETO", className: "bg-emerald-500/15 text-emerald-300", icon: "🟢" },
+  waiting: { label: "LOTEADO", className: "bg-cyan-500/15 text-cyan-300", icon: "📦" },
+  complete: { label: "EN EL COFRE", className: "bg-emerald-500/15 text-emerald-300", icon: "🟢" },
   transferred: { label: "TRANSFERIDO", className: "bg-amber-500/15 text-amber-300", icon: "🟡" },
-  pending: { label: "PENDIENTE / RAT", className: "bg-rose-500/15 text-rose-300", icon: "🔴" },
+  pending: { label: "FALTA EN COFRE", className: "bg-rose-500/15 text-rose-300", icon: "🔴" },
 } as const;
 
 export function AuditView() {
   const chestText = useAppStore((s) => s.chestText);
   const setChestText = useAppStore((s) => s.setChestText);
-  const parseChest = useAppStore((s) => s.parseChest);
   const parsedChest = useAppStore((s) => s.parsedChest);
   const loot = useAppStore((s) => s.loot);
   const trades = useAppStore((s) => s.trades);
@@ -47,7 +49,9 @@ export function AuditView() {
         <div>
           <h1 className="font-display text-3xl font-bold">Conciliación de cofre</h1>
           <p className="text-sm text-slate-500">
-            Loot de pelea − trades a oficiales vs inventario real del cofre.
+            Primero ves solo lo loteado. Cuando pegas el cofre, cada ítem pasa a{" "}
+            <span className="text-emerald-300">está en el cofre</span> o{" "}
+            <span className="text-rose-300">no está</span>.
           </p>
         </div>
         <div className="space-y-2">
@@ -64,32 +68,34 @@ export function AuditView() {
                     {st.icon} {st.label}
                   </span>
                 </div>
-                <div className="mt-3 grid grid-cols-3 gap-3 text-xs">
-                  <Meta label="Loteado" value={formatSilver(p.lootedSilver)} />
-                  <Meta label="En cofre" value={formatSilver(p.depositedSilver)} />
-                  <Meta label="Pendiente" value={formatSilver(p.pendingSilver)} />
-                </div>
-                {p.pending.length > 0 && (
-                  <div className="mt-3 rounded-lg bg-rose-500/10 p-3 text-sm text-rose-200">
-                    <div className="mb-1 text-[11px] uppercase tracking-wider text-rose-300/70">
-                      Ítems que loteó y no están en el cofre
+                {!audit.chestReady && (
+                  <ItemList
+                    title="Loot de cadáver"
+                    items={p.looted}
+                    empty="Sin ítems de combate"
+                    tone="neutral"
+                  />
+                )}
+                {audit.chestReady && (
+                  <>
+                    <div className="mt-3 grid grid-cols-3 gap-3 text-xs">
+                      <Meta label="Loteado" value={formatSilver(p.lootedSilver)} />
+                      <Meta label="En cofre" value={formatSilver(p.depositedSilver)} />
+                      <Meta label="Falta" value={formatSilver(p.pendingSilver)} />
                     </div>
-                    {p.pending.map((i) => (
-                      <div key={i.key}>{displayItem(i.name, i.enchantment, i.quantity)}</div>
-                    ))}
-                  </div>
+                    <ItemList title="Está en el cofre" items={p.deposited} empty="Nada depositado" tone="ok" />
+                    <ItemList title="No está en el cofre" items={p.pending} empty="Nada pendiente" tone="bad" />
+                  </>
                 )}
                 {p.transferred.length > 0 && (
-                  <div className="mt-2 text-xs text-amber-200/80">
-                    Transferido: {p.transferred.map((i) => displayItem(i.name, i.enchantment, i.quantity)).join(", ")}
-                  </div>
+                  <ItemList title="Transferido a oficial" items={p.transferred} empty="" tone="warn" />
                 )}
               </div>
             );
           })}
           {players.length === 0 && (
             <div className="rounded-xl border border-dashed border-white/10 px-6 py-16 text-center text-slate-500">
-              No hay loot para conciliar. Captura un ZvZ o carga la demo.
+              Todavía no hay loot de cadáver. Recoge ítems en el mundo; el banco no cuenta.
             </div>
           )}
         </div>
@@ -99,7 +105,7 @@ export function AuditView() {
         <div className="rounded-xl border border-white/10 bg-ink-800/70 p-4">
           <div className="text-sm font-semibold">Pegar cofre de Albion</div>
           <p className="mb-3 text-xs text-slate-500">
-            Usa el botón oficial de copiar en la pestaña del cofre y pega el texto aquí.
+            Copia el inventario del cofre en el juego y pégalo aquí. Se compara al instante con lo loteado.
           </p>
           <textarea
             value={chestText}
@@ -108,15 +114,14 @@ export function AuditView() {
             placeholder={"2\tAdept's Bag\n1\tElder's Bow@3"}
             className="w-full resize-none rounded-lg border border-white/10 bg-ink-900 p-3 font-mono text-xs outline-none focus:ring-2 focus:ring-gold-500/40"
           />
-          <button
-            onClick={parseChest}
-            className="mt-3 w-full rounded-lg bg-gold-500 py-2 text-sm font-semibold text-ink-950 hover:bg-gold-400"
-          >
-            Parsear e inventariar
-          </button>
           {parsed && (
             <div className="mt-3 text-xs text-slate-400">
-              {parsed.items.length} stacks · {parsed.logs.length} logs de depósito/retiro
+              {parsed.items.length} stacks en el cofre
+              {audit.unmatchedChest.length > 0 && (
+                <div className="mt-1 text-slate-500">
+                  {audit.unmatchedChest.length} stacks del cofre no coinciden con loot de esta pelea
+                </div>
+              )}
               {parsed.warnings.length > 0 && (
                 <div className="mt-2 text-amber-300">
                   {parsed.warnings.slice(0, 4).map((w) => (
@@ -128,6 +133,44 @@ export function AuditView() {
           )}
         </div>
       </aside>
+    </div>
+  );
+}
+
+function ItemList({
+  title,
+  items,
+  empty,
+  tone,
+}: {
+  title: string;
+  items: ItemDelta[];
+  empty: string;
+  tone: "ok" | "bad" | "warn" | "neutral";
+}) {
+  const toneClass =
+    tone === "ok"
+      ? "bg-emerald-500/10 text-emerald-100"
+      : tone === "bad"
+        ? "bg-rose-500/10 text-rose-100"
+        : tone === "warn"
+          ? "bg-amber-500/10 text-amber-100"
+          : "bg-white/5 text-slate-200";
+  return (
+    <div className={cn("mt-3 rounded-lg p-3 text-sm", toneClass)}>
+      <div className="mb-2 text-[11px] uppercase tracking-wider opacity-70">{title}</div>
+      {items.length === 0 ? (
+        <div className="text-xs opacity-60">{empty}</div>
+      ) : (
+        <div className="space-y-1.5">
+          {items.map((i) => (
+            <div key={i.key} className="flex items-center gap-2">
+              <ItemIcon uniqueName={i.uniqueName} enchantment={i.enchantment} size={28} label={i.name} />
+              <span>{displayItem(i.name, i.enchantment, i.quantity)}</span>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

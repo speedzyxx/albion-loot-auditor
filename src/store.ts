@@ -85,7 +85,11 @@ export const useAppStore = create<AppState>()(
       updateInfo: null,
       setView: (view) => set({ view }),
       setQuery: (query) => set({ query }),
-      setChestText: (chestText) => set({ chestText }),
+      setChestText: (chestText) =>
+        set({
+          chestText,
+          parsedChest: chestText.trim() ? parseChestPaste(chestText) : null,
+        }),
       parseChest: () => set({ parsedChest: parseChestPaste(get().chestText) }),
       addLoot: (event) =>
         set((s) => ({

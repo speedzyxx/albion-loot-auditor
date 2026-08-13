@@ -77,6 +77,12 @@ impl ClusterBook {
             ("5000", "Brecilien"),
             ("5001", "Brecilien"),
             ("1311", "Watchwood Precipice"),
+            ("1012", "Merlyn's Rest"),
+            ("0301", "Thetford Portal"),
+            ("1301", "Lymhurst Portal"),
+            ("2301", "Bridgewatch Portal"),
+            ("3301", "Martlock Portal"),
+            ("4301", "Fort Sterling Portal"),
         ];
         for (idx, name) in CITIES {
             book.insert(idx, name);

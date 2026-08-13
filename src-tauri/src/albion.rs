@@ -298,53 +298,85 @@ impl SessionWorld {
     }
 
     fn try_cluster(&mut self, p: &BTreeMap<u8, PhotonValue>, op: Option<i64>) -> Option<SessionEvent> {
-        // Game events (param 252) carry object ids, not the cluster. Join is
-        // op 2 with mapId at 8; ChangeCluster is op 41/35 with index at 0.
+        // Only Join (2) and ChangeCluster (35/41). Other ops reuse param 8 for
+        // object ids that collide with royal-zone indexes (1012 = Merlyn's Rest).
         if p.contains_key(&252) {
             return None;
         }
-        let op = op.or_else(|| p.get(&253).and_then(PhotonValue::as_i64));
+        let op = op.or_else(|| p.get(&253).and_then(PhotonValue::as_i64))?;
 
-        let mut found = self.cluster_from_value(p.get(&8));
-        if found.is_none() && matches!(op, Some(2) | Some(35) | Some(41)) {
-            found = self.cluster_from_value(p.get(&0));
-        }
-        if found.is_none() {
-            if let Some(s) = p.get(&0).and_then(PhotonValue::as_str) {
-                found = self.clusters.resolve_fuzzy(s);
-            }
-        }
-        if found.is_none() {
-            found = walk_strings(p).into_iter().find_map(|s| {
-                self.clusters.resolve_fuzzy(&s).or_else(|| {
-                    looks_like_map(&s).then_some(s)
-                })
-            });
-        }
+        let (cluster_id, name) = match op {
+            2 => self.cluster_from_join(p)?,
+            35 | 41 => self.cluster_from_change(p)?,
+            _ => return None,
+        };
 
-        let map = found?;
+        let map = if name.to_ascii_lowercase().contains(&cluster_id.to_ascii_lowercase()) {
+            name
+        } else {
+            format!("{name} ({cluster_id})")
+        };
         if self.current_map.as_deref() == Some(map.as_str()) {
             return None;
         }
         self.current_map = Some(map.clone());
         Some(SessionEvent::Cluster(ClusterInfo {
             map,
+            cluster_id: Some(cluster_id),
             timestamp: now_ms(),
         }))
     }
 
-    fn cluster_from_value(&self, value: Option<&PhotonValue>) -> Option<String> {
+    fn cluster_from_join(&self, p: &BTreeMap<u8, PhotonValue>) -> Option<(String, String)> {
+        // Join / JoinFinished: mapId is parameter 8.
+        self.cluster_from_value(p.get(&8))
+            .or_else(|| {
+                p.get(&8)
+                    .and_then(PhotonValue::as_str)
+                    .and_then(|s| self.named_instance(s))
+            })
+    }
+
+    fn cluster_from_change(&self, p: &BTreeMap<u8, PhotonValue>) -> Option<(String, String)> {
+        // ChangeCluster: destination index in parameter 0.
+        self.cluster_from_value(p.get(&0))
+    }
+
+    fn named_instance(&self, raw: &str) -> Option<(String, String)> {
+        let t = raw.trim();
+        if t.is_empty() {
+            return None;
+        }
+        let lower = t.to_ascii_lowercase();
+        if lower.contains("mist") {
+            return Some((t.to_string(), "Mists".into()));
+        }
+        if lower.contains("hideout") {
+            return Some((t.to_string(), "Hideout".into()));
+        }
+        None
+    }
+
+    fn cluster_from_value(&self, value: Option<&PhotonValue>) -> Option<(String, String)> {
         let value = value?;
         if let Some(s) = value.as_str() {
-            return self.clusters.resolve_fuzzy(s);
+            let id = s.split('@').next().unwrap_or(s).trim();
+            let name = self.clusters.resolve(s)?;
+            let label = if id.chars().all(|c| c.is_ascii_digit()) {
+                id.to_string()
+            } else {
+                s.trim().to_string()
+            };
+            return Some((label, name));
         }
         if let Some(n) = value.as_i64() {
-            return self.clusters.resolve_number(n);
+            let name = self.clusters.resolve_number(n)?;
+            return Some((n.to_string(), name));
         }
         if let PhotonValue::Array(arr) = value {
             for entry in arr {
-                if let Some(name) = self.cluster_from_value(Some(entry)) {
-                    return Some(name);
+                if let Some(hit) = self.cluster_from_value(Some(entry)) {
+                    return Some(hit);
                 }
             }
         }
@@ -467,16 +499,13 @@ impl SessionWorld {
     }
 
     fn resolve_item(&self, item_num_id: i32) -> (String, String, i32) {
-        self.item_names
-            .get(&item_num_id)
-            .cloned()
-            .unwrap_or_else(|| {
-                (
-                    format!("ITEM_{item_num_id}"),
-                    format!("Item #{item_num_id}"),
-                    enchant_from_id(item_num_id),
-                )
-            })
+        crate::items::lookup(&self.item_names, item_num_id).unwrap_or_else(|| {
+            (
+                format!("ITEM_{item_num_id}"),
+                format!("Item #{item_num_id}"),
+                0,
+            )
+        })
     }
 
     fn resolve_player(&self, object_id: i32) -> Option<String> {
@@ -683,31 +712,6 @@ fn extract_item_list(p: &BTreeMap<u8, PhotonValue>) -> Vec<LostItem> {
     items
 }
 
-fn walk_strings(p: &BTreeMap<u8, PhotonValue>) -> Vec<String> {
-    let mut out = Vec::new();
-    for v in p.values() {
-        collect_strings(v, &mut out);
-    }
-    out
-}
-
-fn collect_strings(v: &PhotonValue, out: &mut Vec<String>) {
-    match v {
-        PhotonValue::String(s) if !s.is_empty() => out.push(s.clone()),
-        PhotonValue::Array(arr) => {
-            for x in arr {
-                collect_strings(x, out);
-            }
-        }
-        PhotonValue::Map(m) => {
-            for x in m.values() {
-                collect_strings(x, out);
-            }
-        }
-        _ => {}
-    }
-}
-
 fn looks_like_player_name(s: &str) -> bool {
     let t = s.trim();
     if t.len() < 3 || t.len() > 24 {
@@ -716,57 +720,6 @@ fn looks_like_player_name(s: &str) -> bool {
     t.chars()
         .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
         && t.chars().any(|c| c.is_ascii_alphabetic())
-}
-
-fn looks_like_map(s: &str) -> bool {
-    let t = s.trim();
-    if t.len() < 3 || t.len() > 80 {
-        return false;
-    }
-    let lower = t.to_ascii_lowercase();
-    const MARKERS: &[&str] = &[
-        "cluster",
-        "black",
-        "outlands",
-        "roads",
-        "mists",
-        "tnl",
-        "rnd",
-        "portal",
-        "city",
-        "ciudad",
-        "hideout",
-        "island",
-        "bridgewatch",
-        "martlock",
-        "thetford",
-        "lymhurst",
-        "sterling",
-        "caerleon",
-        "brecilien",
-        "steppe",
-        "highland",
-        "forest",
-        "mountain",
-        "swamp",
-        "yellow",
-        "red zone",
-        "gvg",
-        "hellgate",
-        "corrupted",
-        "avalon",
-    ];
-    if MARKERS.iter().any(|m| lower.contains(m)) {
-        return true;
-    }
-    if t.contains(' ') && t.chars().any(|c| c.is_alphabetic()) && t.len() >= 5 {
-        return !looks_like_player_name(t);
-    }
-    t.chars().all(|c| c.is_ascii_digit()) && t.len() >= 4
-}
-
-fn enchant_from_id(_id: i32) -> i32 {
-    0
 }
 
 fn now_ms() -> i64 {

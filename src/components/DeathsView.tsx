@@ -43,7 +43,7 @@ export function DeathsView() {
               <ul className="mt-2 space-y-1 text-sm text-slate-300">
                 {d.lostItems.map((i, idx) => (
                   <li key={idx} className="flex items-center gap-2">
-                    <ItemIcon uniqueName={i.itemUniqueName} enchantment={i.enchantment} size={32} />
+                    <ItemIcon uniqueName={i.itemUniqueName} enchantment={i.enchantment} size={32} label={i.itemName} />
                     <span>
                       {i.quantity}× {i.itemName}
                       {i.enchantment ? `.${i.enchantment}` : ""}

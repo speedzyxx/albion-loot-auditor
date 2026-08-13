@@ -1,6 +1,6 @@
 [package]
 name = "albion-loot-auditor"
-version = "0.1.4"
+version = "0.1.5"
 description = "Albion Loot Auditor & Analytics"
 authors = ["Albion Loot Auditor"]
 edition = "2021"
